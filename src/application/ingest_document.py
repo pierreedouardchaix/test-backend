@@ -6,8 +6,11 @@ from src.application.write_use_case import WriteUseCase
 from src.domain.models.document import Document
 from src.domain.models.workflow import Workflow
 from src.domain.models.workflow_definition import StepDefinition, WorkflowDefinition
+from src.logging_config import get_logger
 from src.ports.blob_store import BlobStore
 from src.ports.workflow_dispatcher import WorkflowDispatcher
+
+_log = get_logger("ingest")
 
 PRIMMO_DEFINITION = WorkflowDefinition(
     name="primmo_ingestion",
@@ -68,6 +71,12 @@ class IngestDocumentUseCase(WriteUseCase[IngestDocumentCommand, IngestDocumentRe
         )
         self._uow.documents.save(doc)
         self._uow.workflows.save(workflow)
+        # NB: avoid keys that collide with reserved LogRecord attributes (e.g.
+        # `filename`, `module`, `name`) — the stdlib logging raises on those.
+        _log.info(
+            "document ingested",
+            extra={"doc_id": str(doc.id), "tenant_id": str(command.tenant_id), "document_name": command.filename},
+        )
         return IngestDocumentResult(
             document_id=doc.id,
             workflow_status=workflow.status.value,

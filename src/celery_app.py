@@ -25,6 +25,10 @@ from src.application.apply_partner_callback import (
 from src.application.concurrency import run_with_retry
 from src.application.pipeline_step_executor import PipelineStepExecutor
 from src.bootstrap import get_blob_store, get_event_publisher, new_unit_of_work
+from src.logging_config import configure_logging, get_logger
+
+configure_logging()
+_log = get_logger("celery")
 
 # Reads REDIS_URL directly (not via bootstrap.get_settings()): constructing
 # the Celery app happens at import time, so it must not require every other
@@ -73,8 +77,18 @@ def apply_partner_callback(
             ).execute(command)
         )
     except CallbackPremature as exc:
+        _log.info("partner callback premature, retrying", extra={"partner_job_id": partner_job_id})
         raise self.retry(exc=exc)
 
+    _log.info(
+        "partner callback applied",
+        extra={
+            "doc_id": str(callback_result.workflow_id),
+            "partner_job_id": partner_job_id,
+            "succeeded": succeeded,
+            "already_processed": callback_result.already_processed,
+        },
+    )
     for next_step_name in callback_result.newly_ready:
         run_pipeline_step.delay(
             tenant_id=str(callback_result.tenant_id),

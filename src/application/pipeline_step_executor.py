@@ -6,9 +6,12 @@ from src.application.concurrency import run_with_retry
 from src.application.unit_of_work import UnitOfWork
 from src.application.workflow_orchestrator import WorkflowOrchestrator
 from src.domain.models.task import TaskStatus
+from src.logging_config import get_logger
 from src.ports.blob_store import BlobStore
 from src.ports.event_publisher import EventPublisher
 from src.ports.task_instance_runner import Deferred, TaskInstanceRunner
+
+_log = get_logger("pipeline")
 
 
 class PipelineStepExecutor:
@@ -44,6 +47,9 @@ class PipelineStepExecutor:
         self._events = event_publisher
 
     def execute_step(self, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID, step_name: str) -> frozenset[str]:
+        log_context = {"doc_id": str(workflow_id), "step": step_name, "tenant_id": str(tenant_id)}
+        _log.info("step running", extra=log_context)
+
         input_blob_keys = run_with_retry(
             lambda: self._start(tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name)
         )
@@ -57,6 +63,7 @@ class PipelineStepExecutor:
             status = run_with_retry(
                 lambda: self._fail(tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name, error=str(exc))
             )
+            _log.warning("step %s", status.value, extra={**log_context, "error": str(exc)})
             return frozenset({step_name}) if status == TaskStatus.RETRYING else frozenset()
 
         if isinstance(result, Deferred):
@@ -71,10 +78,13 @@ class PipelineStepExecutor:
                     partner_job_id=result.partner_job_id,
                 )
             )
+            _log.info("step deferred (awaiting partner callback)", extra={**log_context, "partner_job_id": result.partner_job_id})
             return frozenset()
-        return run_with_retry(
+        newly_ready = run_with_retry(
             lambda: self._succeed(tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name, result=result)
         )
+        _log.info("step succeeded", extra={**log_context, "unblocked": sorted(newly_ready)})
+        return newly_ready
 
     def _start(self, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID, step_name: str) -> dict[str, str]:
         """Mark the step started (committed before it runs) and return the blob

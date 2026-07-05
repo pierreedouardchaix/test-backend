@@ -5,8 +5,10 @@ from src.application.apply_partner_callback import WorkflowNotFound
 from src.application.get_document import DocumentNotFound
 from src.auth import AuthContext, get_current_user
 from src.domain.errors import TaskNotFound
+from src.logging_config import configure_logging
 from src.routers import auth, dev, documents, webhooks
 
+configure_logging()
 app = FastAPI()
 app.include_router(auth.router)
 app.include_router(documents.router)
