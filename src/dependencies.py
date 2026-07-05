@@ -3,7 +3,8 @@
 - get_settings: cached Settings loaded once at startup.
 - get_session: per-request SQLAlchemy session (for read-only use cases).
 - get_uow: per-request UnitOfWork (for write use cases).
-- get_blob_store: singleton BlobStore (in-memory for now, swappable later).
+- get_blob_store: singleton BlobStore, on a filesystem directory shared by
+  the API and Celery workers (a volume in docker-compose).
 """
 from collections.abc import Generator
 from functools import lru_cache
@@ -11,7 +12,7 @@ from functools import lru_cache
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
-from src.adapters.in_memory.blob_store import InMemoryBlobStore
+from src.adapters.filesystem.blob_store import FileSystemBlobStore
 from src.adapters.in_memory.event_publisher import InMemoryEventPublisher
 from src.adapters.in_memory.workflow_dispatcher import NoOpWorkflowDispatcher
 from src.adapters.sql.document_data_source import SqlAlchemyDocumentDataSource
@@ -52,7 +53,7 @@ def get_uow() -> SqlAlchemyUnitOfWork:
 
 @lru_cache(maxsize=1)
 def get_blob_store() -> BlobStore:
-    return InMemoryBlobStore()
+    return FileSystemBlobStore(get_settings().blob_storage_dir)
 
 
 @lru_cache(maxsize=1)

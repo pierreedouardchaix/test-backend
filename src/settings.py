@@ -11,6 +11,7 @@ class Settings:
     dev_mode: bool
     partner_hmac_secret: str
     redis_url: str = "redis://localhost:6379/0"
+    blob_storage_dir: str = "/tmp/primmo-blobs"
 
     @classmethod
     def from_env(cls) -> Self:
@@ -21,4 +22,5 @@ class Settings:
             dev_mode=os.getenv("DEV_MODE", "false").lower() == "true",
             partner_hmac_secret=os.environ["PARTNER_HMAC_SECRET"],
             redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+            blob_storage_dir=os.getenv("BLOB_STORAGE_DIR", "/tmp/primmo-blobs"),
         )

@@ -32,12 +32,14 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
+      - blob_data:/data/blobs
     environment:
       DATABASE_URL: postgresql+psycopg://primmo:primmo@postgres:5432/primmo
       JWT_SECRET: dev-secret-change-me
       DEV_MODE: "true"
       PARTNER_HMAC_SECRET: dev-partner-secret-change-me
       REDIS_URL: redis://redis:6379/0
+      BLOB_STORAGE_DIR: /data/blobs
     depends_on:
       seed:
         condition: service_completed_successfully
@@ -72,3 +74,4 @@ services:
 
 volumes:
   postgres_data:
+  blob_data:
