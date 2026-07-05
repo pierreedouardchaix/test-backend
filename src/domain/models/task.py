@@ -85,3 +85,15 @@ class Task:
         self.status = TaskStatus.FAILED
         self.finished_at = datetime.now(timezone.utc)
         return False
+
+    def fail_terminally(self, error: str) -> None:
+        """Fail with no retry, regardless of remaining attempts — for an
+        outcome declared final by an external authority (e.g. the partner
+        webhook reports the job failed; the partner does its own retrying)."""
+        if self.status != TaskStatus.RUNNING:
+            raise ValueError(f"Cannot fail a task that is {self.status}")
+        self.errors.append(
+            TaskAttemptError(attempt=self.attempts, error=error, occurred_at=datetime.now(timezone.utc))
+        )
+        self.status = TaskStatus.FAILED
+        self.finished_at = datetime.now(timezone.utc)

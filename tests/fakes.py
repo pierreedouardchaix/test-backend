@@ -17,6 +17,9 @@ class FakeWorkflowRepository:
             return None
         return workflow
 
+    def get_by_id(self, workflow_id: uuid.UUID) -> Workflow | None:
+        return self.saved.get(workflow_id)
+
     def save(self, workflow: Workflow) -> None:
         self.saved[workflow.id] = workflow
 

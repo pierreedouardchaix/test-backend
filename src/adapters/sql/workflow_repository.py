@@ -31,10 +31,19 @@ class SqlAlchemyWorkflowRepository:
         row = self._session.get(WorkflowORM, workflow_id)
         if row is None or row.tenant_id != tenant_id:
             return None
+        return self._reconstitute(row)
+
+    def get_by_id(self, workflow_id: uuid.UUID) -> Workflow | None:
+        row = self._session.get(WorkflowORM, workflow_id)
+        if row is None:
+            return None
+        return self._reconstitute(row)
+
+    def _reconstitute(self, row: WorkflowORM) -> Workflow:
         task_rows = list(
-            self._session.execute(select(TaskORM).where(TaskORM.workflow_id == workflow_id)).scalars()
+            self._session.execute(select(TaskORM).where(TaskORM.workflow_id == row.id)).scalars()
         )
-        self._loaded_versions[workflow_id] = row.version
+        self._loaded_versions[row.id] = row.version
         return workflow_from_orm(row, task_rows)
 
     def save(self, workflow: Workflow) -> None:

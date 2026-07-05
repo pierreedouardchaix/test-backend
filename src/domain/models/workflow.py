@@ -106,6 +106,15 @@ class Workflow:
         if not can_retry:
             self.mark_step_failed(step_name, error)
 
+    def on_callback_failed(self, step_name: str, error: str) -> None:
+        """Apply a terminal failure reported by an external callback (the
+        partner webhook). Unlike on_task_failed this never retries — the
+        external authority has already decided the outcome is final."""
+        if self.status != WorkflowStatus.RUNNING:
+            raise ValueError(f"Cannot apply a task outcome on a workflow that is {self.status}")
+        self._require_task(step_name).fail_terminally(error)
+        self.mark_step_failed(step_name, error)
+
     def _require_task(self, step_name: str) -> Task:
         task = self.tasks.get(step_name)
         if task is None:

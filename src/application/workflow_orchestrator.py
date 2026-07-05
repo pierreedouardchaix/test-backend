@@ -91,6 +91,23 @@ class WorkflowOrchestrator:
         self._publish(tenant_id=tenant_id, workflow=workflow, step_name=step_name)
         return workflow.tasks[step_name].status
 
+    def handle_terminal_failure(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        workflow_id: uuid.UUID,
+        step_name: str,
+        error: str,
+    ) -> None:
+        """Apply a failure that is final by decree of an external authority
+        (the partner webhook) — no retry, the workflow becomes terminal."""
+        workflow = self._require_workflow(workflow_id, tenant_id=tenant_id)
+
+        workflow.on_callback_failed(step_name, error)
+
+        self._workflow_repository.save(workflow)
+        self._publish(tenant_id=tenant_id, workflow=workflow, step_name=step_name)
+
     def _require_workflow(self, workflow_id: uuid.UUID, *, tenant_id: uuid.UUID):
         workflow = self._workflow_repository.get(workflow_id, tenant_id=tenant_id)
         if workflow is None:

@@ -13,5 +13,8 @@ class InMemoryWorkflowRepository:
             return None
         return workflow
 
+    def get_by_id(self, workflow_id: uuid.UUID) -> Workflow | None:
+        return self._workflows.get(workflow_id)
+
     def save(self, workflow: Workflow) -> None:
         self._workflows[workflow.id] = workflow
