@@ -61,9 +61,20 @@ class _WriteUseCaseBase(ABC, Generic[TCommand, TResult]):
 class WriteUseCase(_WriteUseCaseBase[TScopedCommand, TResult]):
     """A **single-tenant** write: the command names its tenant, and the UoW is
     RLS-scoped to it automatically. This is the common case — subclasses only
-    implement _execute and never touch scoping."""
+    implement _execute and never touch scoping.
+
+    The command must satisfy TenantScopedCommand (`tenant_id`). That is enforced
+    statically by the TypeVar bound (a type checker rejects a command without
+    it); the runtime guard below is the fail-fast belt for when no checker runs
+    — a clear TypeError instead of a bare AttributeError deep in the scope call."""
 
     def _scope(self, command: TScopedCommand) -> None:
+        if not hasattr(command, "tenant_id"):
+            raise TypeError(
+                f"{type(command).__name__} has no tenant_id — a single-tenant WriteUseCase "
+                f"command must satisfy TenantScopedCommand. For a tenant-less write, subclass "
+                f"CrossTenantWriteUseCase instead."
+            )
         self._uow.scope_to_tenant(command.tenant_id)
 
 

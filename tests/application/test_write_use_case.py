@@ -61,3 +61,20 @@ def test_cross_tenant_write_scopes_the_uow_to_the_bypass():
     uow = FakeUnitOfWork()
     _CrossTenantUseCase(uow).execute(DummyCommand())
     assert uow.scoped_tenant == CROSS_TENANT
+
+
+@dataclass(frozen=True)
+class _NoTenantCommand:
+    pass
+
+
+class _MisusedUseCase(WriteUseCase[_NoTenantCommand, DummyResult]):
+    def _execute(self, command):
+        return DummyResult()
+
+
+def test_single_tenant_write_without_tenant_id_fails_fast_with_a_clear_error():
+    """Runtime belt for when no type checker runs: a WriteUseCase whose command
+    lacks tenant_id raises a clear TypeError, not a buried AttributeError."""
+    with pytest.raises(TypeError, match="tenant_id"):
+        _MisusedUseCase(FakeUnitOfWork()).execute(_NoTenantCommand())
