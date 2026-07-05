@@ -10,6 +10,7 @@ class Settings:
     jwt_expiry_seconds: int
     dev_mode: bool
     partner_hmac_secret: str
+    redis_url: str = "redis://localhost:6379/0"
 
     @classmethod
     def from_env(cls) -> Self:
@@ -19,4 +20,5 @@ class Settings:
             jwt_expiry_seconds=int(os.getenv("JWT_EXPIRY_SECONDS", "3600")),
             dev_mode=os.getenv("DEV_MODE", "false").lower() == "true",
             partner_hmac_secret=os.environ["PARTNER_HMAC_SECRET"],
+            redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         )
