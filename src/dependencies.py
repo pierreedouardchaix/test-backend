@@ -3,14 +3,19 @@
 - get_settings: cached Settings loaded once at startup.
 - get_session: per-request SQLAlchemy session (for read-only use cases).
 - get_uow: per-request UnitOfWork (for write use cases).
+- get_blob_store: singleton BlobStore (in-memory for now, swappable later).
 """
 from collections.abc import Generator
 from functools import lru_cache
 
 from sqlalchemy.orm import Session
 
+from src.adapters.in_memory.blob_store import InMemoryBlobStore
+from src.adapters.in_memory.workflow_dispatcher import NoOpWorkflowDispatcher
 from src.adapters.sql.engine import create_db_engine, create_session_factory
 from src.adapters.sql.unit_of_work import SqlAlchemyUnitOfWork
+from src.ports.blob_store import BlobStore
+from src.ports.workflow_dispatcher import WorkflowDispatcher
 from src.settings import Settings
 
 
@@ -35,8 +40,16 @@ def get_session() -> Generator[Session, None, None]:
         session.close()
 
 
-def get_uow() -> Generator[SqlAlchemyUnitOfWork, None, None]:
-    """Unit of work for write use cases. Caller must call uow.commit()."""
-    uow = SqlAlchemyUnitOfWork(_get_session_factory())
-    with uow as u:
-        yield u
+def get_uow() -> SqlAlchemyUnitOfWork:
+    """Provides an un-entered UnitOfWork. WriteUseCase.execute() owns the lifecycle."""
+    return SqlAlchemyUnitOfWork(_get_session_factory())
+
+
+@lru_cache(maxsize=1)
+def get_blob_store() -> BlobStore:
+    return InMemoryBlobStore()
+
+
+@lru_cache(maxsize=1)
+def get_workflow_dispatcher() -> WorkflowDispatcher:
+    return NoOpWorkflowDispatcher()
