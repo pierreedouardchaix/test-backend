@@ -9,10 +9,6 @@ from src.domain.models.workflow import WorkflowStatus
 from src.ports.blob_store import BlobStore
 from src.ports.event_publisher import EventPublisher
 
-# The single step whose completion the partner reports. The workflow id doubles
-# as the correlation key (job_id), so a callback maps to exactly this step.
-EXTERNAL_CALL_STEP = "external_call"
-
 
 class WorkflowNotFound(Exception):
     """No workflow matches the callback's job_id → the endpoint answers 404."""
@@ -21,6 +17,7 @@ class WorkflowNotFound(Exception):
 @dataclass(frozen=True)
 class PartnerCallbackCommand:
     job_id: uuid.UUID  # == document/workflow id (see dev_considerations.md)
+    step_name: str  # which step the callback completes — injected by the endpoint
     succeeded: bool
     result: Any | None = None  # the partner's payload, when succeeded
     error: str | None = None  # failure reason, when failed
@@ -33,8 +30,8 @@ class PartnerCallbackResult:
 
 
 class ApplyPartnerCallbackUseCase(WriteUseCase[PartnerCallbackCommand, PartnerCallbackResult]):
-    """Applies a partner webhook to the external_call step, through the same
-    WorkflowOrchestrator every other trigger funnels through.
+    """Applies a partner webhook to the step named in the command, through the
+    same WorkflowOrchestrator every other trigger funnels through.
 
     Idempotent by design: the partner retries on non-2xx, so a callback that
     lands after the step is already terminal is a silent no-op (the endpoint
@@ -63,14 +60,14 @@ class ApplyPartnerCallbackUseCase(WriteUseCase[PartnerCallbackCommand, PartnerCa
             orchestrator.handle_step_success(
                 tenant_id=tenant_id,
                 workflow_id=command.job_id,
-                step_name=EXTERNAL_CALL_STEP,
+                step_name=command.step_name,
                 result=command.result,
             )
         else:
             orchestrator.handle_terminal_failure(
                 tenant_id=tenant_id,
                 workflow_id=command.job_id,
-                step_name=EXTERNAL_CALL_STEP,
+                step_name=command.step_name,
                 error=command.error or "partner reported failure",
             )
 

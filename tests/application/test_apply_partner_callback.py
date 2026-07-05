@@ -40,7 +40,7 @@ def test_completed_callback_finishes_the_workflow():
     blob = FakeBlobStore()
 
     result = _use_case(uow, blob=blob).execute(
-        PartnerCallbackCommand(job_id=job_id, succeeded=True, result={"indexed": True})
+        PartnerCallbackCommand(job_id=job_id, step_name="external_call", succeeded=True, result={"indexed": True})
     )
 
     assert result.already_processed is False
@@ -61,7 +61,7 @@ def test_failed_callback_fails_the_workflow_without_retry():
     uow.workflows.save(_workflow_awaiting_callback(TENANT_A, job_id))
 
     result = _use_case(uow).execute(
-        PartnerCallbackCommand(job_id=job_id, succeeded=False, error="partner boom")
+        PartnerCallbackCommand(job_id=job_id, step_name="external_call", succeeded=False, error="partner boom")
     )
 
     assert result.workflow_status == WorkflowStatus.FAILED.value
@@ -83,12 +83,12 @@ def test_replayed_callback_is_a_silent_noop():
     # Each webhook delivery is a fresh use case over the same store (WriteUseCase
     # instances are single-use — the UoW is swapped out after execute()).
     _use_case(uow, blob=blob, events=events).execute(
-        PartnerCallbackCommand(job_id=job_id, succeeded=True, result={"n": 1})
+        PartnerCallbackCommand(job_id=job_id, step_name="external_call", succeeded=True, result={"n": 1})
     )
     events_after_first = len(events.published)
 
     replay = _use_case(uow, blob=blob, events=events).execute(
-        PartnerCallbackCommand(job_id=job_id, succeeded=True, result={"n": 2})
+        PartnerCallbackCommand(job_id=job_id, step_name="external_call", succeeded=True, result={"n": 2})
     )
 
     assert replay.already_processed is True
@@ -100,7 +100,7 @@ def test_replayed_callback_is_a_silent_noop():
 def test_unknown_job_id_raises():
     uow = FakeUnitOfWork()
     with pytest.raises(WorkflowNotFound):
-        _use_case(uow).execute(PartnerCallbackCommand(job_id=uuid.uuid4(), succeeded=True, result={}))
+        _use_case(uow).execute(PartnerCallbackCommand(job_id=uuid.uuid4(), step_name="external_call", succeeded=True, result={}))
 
 
 def test_tenant_is_resolved_from_the_stored_workflow():
@@ -110,7 +110,7 @@ def test_tenant_is_resolved_from_the_stored_workflow():
     events = FakeEventPublisher()
 
     _use_case(uow, events=events).execute(
-        PartnerCallbackCommand(job_id=job_id, succeeded=True, result={})
+        PartnerCallbackCommand(job_id=job_id, step_name="external_call", succeeded=True, result={})
     )
 
     # The published event carries tenant B — proving the tenant came from the
