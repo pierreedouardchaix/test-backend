@@ -5,7 +5,8 @@
 - get_session: per-request SQLAlchemy session (for read-only use cases).
 - get_uow: per-request UnitOfWork (for write use cases).
 """
-from collections.abc import Generator
+import uuid
+from collections.abc import Callable, Generator
 from functools import lru_cache
 
 from fastapi import Depends
@@ -17,14 +18,25 @@ from src.adapters.sql.unit_of_work import SqlAlchemyUnitOfWork
 from src.bootstrap import (
     get_blob_store,
     get_event_publisher,
+    get_event_stream,
     get_session_factory,
     get_settings,
     new_unit_of_work,
+    read_document_detail,
 )
-from src.ports.document_data_source import DocumentDataSource
+from src.ports.document_data_source import DocumentDataSource, DocumentDetailRow
 from src.ports.workflow_dispatcher import WorkflowDispatcher
 
-__all__ = ["get_blob_store", "get_event_publisher", "get_settings"]
+__all__ = ["get_blob_store", "get_event_publisher", "get_event_stream", "get_settings"]
+
+DocumentReader = Callable[[uuid.UUID, uuid.UUID], DocumentDetailRow | None]
+
+
+def get_document_reader() -> DocumentReader:
+    """Short-session document reader for the SSE endpoint's ownership check —
+    see bootstrap.read_document_detail for why it isn't the request-scoped
+    session (a request session would stay pinned for the whole SSE stream)."""
+    return read_document_detail
 
 
 def get_session() -> Generator[Session, None, None]:

@@ -8,12 +8,18 @@ from functools import lru_cache
 
 from sqlalchemy.orm import Session, sessionmaker
 
+import uuid
+
 from src.adapters.filesystem.blob_store import FileSystemBlobStore
 from src.adapters.redis.event_publisher import RedisEventPublisher
+from src.adapters.redis.event_stream import RedisEventStream
+from src.adapters.sql.document_data_source import SqlAlchemyDocumentDataSource
 from src.adapters.sql.engine import create_db_engine, create_session_factory
 from src.adapters.sql.unit_of_work import SqlAlchemyUnitOfWork
 from src.ports.blob_store import BlobStore
+from src.ports.document_data_source import DocumentDetailRow
 from src.ports.event_publisher import EventPublisher
+from src.ports.event_stream import EventStream
 from src.settings import Settings
 
 
@@ -49,3 +55,24 @@ def get_event_publisher() -> EventPublisher:
     the SSE endpoint sees every transition regardless of which process caused
     it."""
     return RedisEventPublisher.from_url(get_settings().redis_url)
+
+
+@lru_cache(maxsize=1)
+def get_event_stream() -> EventStream:
+    """Read side of the bus — the SSE endpoint subscribes through this. API
+    process only (the workers publish, they never consume)."""
+    return RedisEventStream(get_settings().redis_url)
+
+
+def read_document_detail(document_id: uuid.UUID, tenant_id: uuid.UUID) -> DocumentDetailRow | None:
+    """Read a document's current detail through a short-lived session (open →
+    read → close). Deliberately NOT the request-scoped `get_session`: an SSE
+    response is long-lived, and a request-scoped session stays open until the
+    response finishes — which for SSE means the whole streamed connection,
+    pinning one DB connection per connected client. This opens and closes a
+    session per read so the DB connection is released before the long stream."""
+    session = get_session_factory()()
+    try:
+        return SqlAlchemyDocumentDataSource(session).get_by_id(document_id, tenant_id=tenant_id)
+    finally:
+        session.close()
