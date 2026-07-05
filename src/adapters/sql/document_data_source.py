@@ -11,13 +11,16 @@ class SqlAlchemyDocumentDataSource:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def list_by_tenant(self, tenant_id: uuid.UUID) -> list[DocumentRow]:
+    def list_by_tenant(self, tenant_id: uuid.UUID, *, limit: int, offset: int) -> list[DocumentRow]:
         rows = self._session.execute(
             select(DocumentORM, WorkflowORM, UserORM)
             .join(WorkflowORM, WorkflowORM.id == DocumentORM.id)
             .join(UserORM, UserORM.id == DocumentORM.uploaded_by)
             .where(DocumentORM.tenant_id == tenant_id)
-            .order_by(DocumentORM.created_at)
+            # id as tiebreaker so pages don't overlap/skip when created_at ties
+            .order_by(DocumentORM.created_at.desc(), DocumentORM.id)
+            .limit(limit)
+            .offset(offset)
         ).all()
         return [
             DocumentRow(

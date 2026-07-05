@@ -1,7 +1,7 @@
 import json
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from sse_starlette.sse import EventSourceResponse
 
 from src.application.get_document import DocumentNotFound, GetDocumentQuery, GetDocumentUseCase
@@ -133,8 +133,10 @@ async def stream_document_events(
 def list_documents(
     auth: AuthContext = Depends(get_current_user),
     data_source: DocumentDataSource = Depends(get_document_data_source),
+    limit: int = Query(50, ge=1, le=100, description="Max documents to return (1–100)."),
+    offset: int = Query(0, ge=0, description="Number of documents to skip."),
 ):
     result = ListDocumentsUseCase(data_source).execute(
-        ListDocumentsQuery(tenant_id=auth.tenant_id)
+        ListDocumentsQuery(tenant_id=auth.tenant_id, limit=limit, offset=offset)
     )
     return [DocumentSummaryResponse.from_row(doc) for doc in result.documents]

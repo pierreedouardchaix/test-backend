@@ -83,8 +83,9 @@ class FakeDocumentDataSource:
         self._rows: list[DocumentRow] = []
         self._details: dict[uuid.UUID, DocumentDetailRow] = {}
 
-    def list_by_tenant(self, tenant_id: uuid.UUID) -> list[DocumentRow]:
-        return [r for r in self._rows if r.tenant_id == tenant_id]
+    def list_by_tenant(self, tenant_id: uuid.UUID, *, limit: int = 50, offset: int = 0) -> list[DocumentRow]:
+        rows = [r for r in self._rows if r.tenant_id == tenant_id]
+        return rows[offset : offset + limit]
 
     def get_by_id(self, document_id: uuid.UUID, *, tenant_id: uuid.UUID) -> DocumentDetailRow | None:
         row = self._details.get(document_id)

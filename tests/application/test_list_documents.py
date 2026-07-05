@@ -95,6 +95,33 @@ def test_document_row_contains_workflow_status():
     assert result.documents[0].workflow_status == "succeeded"
 
 
+def test_limit_and_offset_paginate_the_results():
+    ds = FakeDocumentDataSource()
+    for i in range(5):
+        ds.add(_row(TENANT_A, USER_1, f"doc-{i}.pdf"))
+
+    first_page = ListDocumentsUseCase(ds).execute(
+        ListDocumentsQuery(tenant_id=TENANT_A, limit=2, offset=0)
+    )
+    second_page = ListDocumentsUseCase(ds).execute(
+        ListDocumentsQuery(tenant_id=TENANT_A, limit=2, offset=2)
+    )
+
+    assert [d.filename for d in first_page.documents] == ["doc-0.pdf", "doc-1.pdf"]
+    assert [d.filename for d in second_page.documents] == ["doc-2.pdf", "doc-3.pdf"]
+
+
+def test_offset_past_the_end_returns_empty():
+    ds = FakeDocumentDataSource()
+    ds.add(_row(TENANT_A, USER_1, "only.pdf"))
+
+    result = ListDocumentsUseCase(ds).execute(
+        ListDocumentsQuery(tenant_id=TENANT_A, limit=10, offset=10)
+    )
+
+    assert result.documents == []
+
+
 def test_document_row_contains_failure_info_when_failed():
     ds = FakeDocumentDataSource()
     ds.add(_row(
