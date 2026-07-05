@@ -12,10 +12,17 @@ different command, same settings/session-factory bootstrap (src.bootstrap).
 """
 import os
 import uuid
+from typing import Any
 
 from celery import Celery
 
 from src.adapters.in_memory.task_instance_runner import InMemoryTaskInstanceRunner
+from src.application.apply_partner_callback import (
+    ApplyPartnerCallbackUseCase,
+    CallbackPremature,
+    PartnerCallbackCommand,
+)
+from src.application.concurrency import run_with_retry
 from src.application.pipeline_step_executor import PipelineStepExecutor
 from src.bootstrap import get_blob_store, get_event_publisher, new_unit_of_work
 
@@ -44,3 +51,33 @@ def run_pipeline_step(tenant_id: str, workflow_id: str, step_name: str) -> None:
     )
     for next_step_name in newly_ready:
         run_pipeline_step.delay(tenant_id=tenant_id, workflow_id=workflow_id, step_name=next_step_name)
+
+
+@celery_app.task(name="webhooks.apply_partner_callback", bind=True, max_retries=5, default_retry_delay=30)
+def apply_partner_callback(
+    self, partner_job_id: str, step_name: str, succeeded: bool, result: Any, error: str | None
+) -> None:
+    """Applies a partner callback off the HTTP request path. `run_with_retry`
+    gives a fresh UoW per attempt — that reload is what makes concurrent
+    deliveries converge (the loser rejoins on fresh state → already terminal →
+    no-op). A CallbackPremature (our side not RUNNING yet) becomes a Celery
+    retry with backoff. Finally, any steps unblocked by the callback are
+    dispatched (a no-op while external_call is the terminal node)."""
+    command = PartnerCallbackCommand(
+        partner_job_id=partner_job_id, step_name=step_name, succeeded=succeeded, result=result, error=error
+    )
+    try:
+        callback_result = run_with_retry(
+            lambda: ApplyPartnerCallbackUseCase(
+                new_unit_of_work(), get_blob_store(), get_event_publisher()
+            ).execute(command)
+        )
+    except CallbackPremature as exc:
+        raise self.retry(exc=exc)
+
+    for next_step_name in callback_result.newly_ready:
+        run_pipeline_step.delay(
+            tenant_id=str(callback_result.tenant_id),
+            workflow_id=str(callback_result.workflow_id),
+            step_name=next_step_name,
+        )

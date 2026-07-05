@@ -3,8 +3,9 @@
 No JWT here — the partner authenticates with an HMAC signature over the raw
 body. The signature MUST be checked against the exact bytes received, so the
 body is read and verified before any parsing (a re-serialized model would not
-match). Correlation and tenant resolution live in the use case; this layer only
-does transport: verify, parse, map errors to status codes.
+match). This layer only does transport: verify, parse, gate on existence, then
+hand off to a Celery task and return 202 — no orchestration work runs inside
+the partner's request (see dev_considerations.md).
 """
 import json
 from typing import Any
@@ -12,16 +13,15 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field, ValidationError
 
-from src.application.apply_partner_callback import (
-    ApplyPartnerCallbackUseCase,
-    PartnerCallbackCommand,
-    WorkflowNotFound,
+from src.application.apply_partner_callback import PartnerCallbackCommand
+from src.dependencies import (
+    PartnerJobResolver,
+    get_partner_callback_dispatcher,
+    get_partner_job_resolver,
+    get_settings,
 )
-from src.application.unit_of_work import UnitOfWork
-from src.dependencies import get_blob_store, get_event_publisher, get_settings, get_uow
 from src.partner_hmac import verify
-from src.ports.blob_store import BlobStore
-from src.ports.event_publisher import EventPublisher
+from src.ports.partner_callback_dispatcher import PartnerCallbackDispatcher
 from src.settings import Settings
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -51,14 +51,13 @@ class PartnerWebhookPayload(BaseModel):
     error: str | None = Field(default=None, max_length=2000)
 
 
-@router.post("/partner")
+@router.post("/partner", status_code=status.HTTP_202_ACCEPTED)
 async def partner_webhook(
     request: Request,
     x_partner_signature: str = Header(default=""),
     settings: Settings = Depends(get_settings),
-    uow: UnitOfWork = Depends(get_uow),
-    blob_store: BlobStore = Depends(get_blob_store),
-    event_publisher: EventPublisher = Depends(get_event_publisher),
+    partner_job_exists: PartnerJobResolver = Depends(get_partner_job_resolver),
+    dispatcher: PartnerCallbackDispatcher = Depends(get_partner_callback_dispatcher),
 ):
     declared_length = _declared_content_length(request.headers.get("content-length"))
     if declared_length is not None and declared_length > _MAX_BODY_BYTES:
@@ -81,16 +80,19 @@ async def partner_webhook(
             detail="status must be 'completed' or 'failed'",
         )
 
-    command = PartnerCallbackCommand(
-        partner_job_id=payload.job_id,
-        step_name="external_call",
-        succeeded=payload.status == "completed",
-        result=payload.result,
-        error=payload.error,
-    )
-    try:
-        result = ApplyPartnerCallbackUseCase(uow, blob_store, event_publisher).execute(command)
-    except WorkflowNotFound:
+    # 404 synchronously if the job id is unknown, so the partner retries (a very
+    # fast webhook can beat our own persistence of the job id — that race resolves
+    # by retry; see dev_considerations.md). Otherwise hand off and return 202.
+    if not partner_job_exists(payload.job_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown job_id")
 
-    return {"workflow_status": result.workflow_status}
+    dispatcher.dispatch(
+        PartnerCallbackCommand(
+            partner_job_id=payload.job_id,
+            step_name="external_call",
+            succeeded=payload.status == "completed",
+            result=payload.result,
+            error=payload.error,
+        )
+    )
+    return {"status": "accepted"}

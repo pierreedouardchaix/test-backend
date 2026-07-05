@@ -1,3 +1,4 @@
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -34,6 +35,8 @@ class PartnerCallbackCommand:
 
 @dataclass(frozen=True)
 class PartnerCallbackResult:
+    workflow_id: uuid.UUID  # resolved from the partner job id — the caller needs it to dispatch newly_ready
+    tenant_id: uuid.UUID
     workflow_status: str
     already_processed: bool
     newly_ready: frozenset[str] = field(default_factory=frozenset)  # steps unblocked, for the caller to dispatch
@@ -61,15 +64,17 @@ class ApplyPartnerCallbackUseCase(WriteUseCase[PartnerCallbackCommand, PartnerCa
         if workflow is None:
             raise WorkflowNotFound(command.partner_job_id)
 
+        ids = dict(workflow_id=workflow.id, tenant_id=workflow.tenant_id)
+
         task = workflow.tasks.get(command.step_name)
         # Task-level idempotence: the step already reached a terminal outcome →
         # this callback (a partner retry, or a duplicate delivery) is a no-op.
         if task is not None and task.status in _TERMINAL_TASK_STATUSES:
-            return PartnerCallbackResult(workflow_status=workflow.status.value, already_processed=True)
+            return PartnerCallbackResult(**ids, workflow_status=workflow.status.value, already_processed=True)
         # Workflow already terminal for another reason (e.g. a sibling step failed)
         # → nothing to apply. Belt-and-suspenders alongside the task check above.
         if workflow.status != WorkflowStatus.RUNNING:
-            return PartnerCallbackResult(workflow_status=workflow.status.value, already_processed=True)
+            return PartnerCallbackResult(**ids, workflow_status=workflow.status.value, already_processed=True)
         # Task missing or not yet RUNNING (e.g. still RETRYING on our side) → the
         # callback got here before we're ready; ask the caller to retry.
         if task is None or task.status != TaskStatus.RUNNING:
@@ -87,7 +92,7 @@ class ApplyPartnerCallbackUseCase(WriteUseCase[PartnerCallbackCommand, PartnerCa
             # still running; none → this completed the DAG → succeeded.
             status = WorkflowStatus.RUNNING if newly_ready else WorkflowStatus.SUCCEEDED
             return PartnerCallbackResult(
-                workflow_status=status.value, already_processed=False, newly_ready=newly_ready
+                **ids, workflow_status=status.value, already_processed=False, newly_ready=newly_ready
             )
 
         orchestrator.handle_terminal_failure(
@@ -96,4 +101,4 @@ class ApplyPartnerCallbackUseCase(WriteUseCase[PartnerCallbackCommand, PartnerCa
             step_name=command.step_name,
             error=command.error or "partner reported failure",
         )
-        return PartnerCallbackResult(workflow_status=WorkflowStatus.FAILED.value, already_processed=False)
+        return PartnerCallbackResult(**ids, workflow_status=WorkflowStatus.FAILED.value, already_processed=False)

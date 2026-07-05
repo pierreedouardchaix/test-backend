@@ -16,6 +16,7 @@ from src.adapters.redis.event_stream import RedisEventStream
 from src.adapters.sql.document_data_source import SqlAlchemyDocumentDataSource
 from src.adapters.sql.engine import create_db_engine, create_session_factory
 from src.adapters.sql.unit_of_work import SqlAlchemyUnitOfWork
+from src.adapters.sql.workflow_repository import SqlAlchemyWorkflowRepository
 from src.ports.blob_store import BlobStore
 from src.ports.document_data_source import DocumentDetailRow
 from src.ports.event_publisher import EventPublisher
@@ -74,5 +75,16 @@ def read_document_detail(document_id: uuid.UUID, tenant_id: uuid.UUID) -> Docume
     session = get_session_factory()()
     try:
         return SqlAlchemyDocumentDataSource(session).get_by_id(document_id, tenant_id=tenant_id)
+    finally:
+        session.close()
+
+
+def partner_job_exists(partner_job_id: str) -> bool:
+    """Whether a task with this partner job id is on record — the webhook's
+    synchronous 404 gate. Short-session read (open → read → close): the webhook
+    only needs existence, not to hold a session while it enqueues."""
+    session = get_session_factory()()
+    try:
+        return SqlAlchemyWorkflowRepository(session).get_by_partner_job_id(partner_job_id) is not None
     finally:
         session.close()

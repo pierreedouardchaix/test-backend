@@ -114,6 +114,14 @@ class FakeWorkflowDispatcher:
         self.dispatched.append({"workflow_id": workflow_id, "tenant_id": tenant_id})
 
 
+class FakePartnerCallbackDispatcher:
+    def __init__(self):
+        self.dispatched: list = []
+
+    def dispatch(self, command) -> None:
+        self.dispatched.append(command)
+
+
 class FakeUnitOfWork:
     """No-op transaction boundary wrapping fake repositories.
 
