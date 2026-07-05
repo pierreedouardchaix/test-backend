@@ -33,6 +33,18 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 _MAX_BODY_BYTES = 64 * 1024  # 64 KB is orders of magnitude above any legitimate callback payload
 
 
+def _declared_content_length(header_value: str | None) -> int | None:
+    """Parse the Content-Length header. A client-supplied header that is not a
+    number is a malformed request (400), not a server error — so this is
+    guarded rather than letting int() raise a 500."""
+    if header_value is None:
+        return None
+    try:
+        return int(header_value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid Content-Length header")
+
+
 class PartnerWebhookPayload(BaseModel):
     job_id: UUID
     status: str  # "completed" | "failed"
@@ -49,8 +61,8 @@ async def partner_webhook(
     blob_store: BlobStore = Depends(get_blob_store),
     event_publisher: EventPublisher = Depends(get_event_publisher),
 ):
-    content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > _MAX_BODY_BYTES:
+    declared_length = _declared_content_length(request.headers.get("content-length"))
+    if declared_length is not None and declared_length > _MAX_BODY_BYTES:
         raise HTTPException(status_code=413, detail="Payload too large")
 
     raw_body = await request.body()

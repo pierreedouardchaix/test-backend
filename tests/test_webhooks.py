@@ -1,6 +1,7 @@
 import json
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.application.ingest_document import PRIMMO_DEFINITION
@@ -143,3 +144,19 @@ def test_error_field_truncated_above_2000_chars_is_422():
         app.dependency_overrides.clear()
 
     assert r.status_code == 422
+
+
+def test_malformed_content_length_is_a_400_not_a_500():
+    """A non-numeric Content-Length is a bad request from the client, not a
+    server error — int() must not be allowed to raise unguarded. Tested at the
+    helper level: httpx recomputes Content-Length, so a malformed value can't
+    be injected through TestClient."""
+    from fastapi import HTTPException
+
+    from src.routers.webhooks import _declared_content_length
+
+    assert _declared_content_length(None) is None
+    assert _declared_content_length("512") == 512
+    with pytest.raises(HTTPException) as exc:
+        _declared_content_length("not-a-number")
+    assert exc.value.status_code == 400
