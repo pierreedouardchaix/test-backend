@@ -11,7 +11,7 @@ from src.dependencies import get_blob_store, get_document_data_source, get_uow, 
 from src.ports.blob_store import BlobStore
 from src.ports.document_data_source import DocumentDataSource
 from src.ports.workflow_dispatcher import WorkflowDispatcher
-from src.routers.schemas import DocumentDetailResponse, DocumentSummaryResponse
+from src.routers.schemas import DocumentDetailResponse, DocumentResultsResponse, DocumentSummaryResponse
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -51,6 +51,23 @@ def get_document(
     except DocumentNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     return DocumentDetailResponse.from_row(row)
+
+
+@router.get("/{document_id}/results", response_model=DocumentResultsResponse)
+def get_document_results(
+    document_id: uuid.UUID,
+    auth: AuthContext = Depends(get_current_user),
+    data_source: DocumentDataSource = Depends(get_document_data_source),
+):
+    try:
+        row = GetDocumentUseCase(data_source).execute(
+            GetDocumentQuery(document_id=document_id, tenant_id=auth.tenant_id)
+        )
+    except DocumentNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    if row.workflow_status != "succeeded":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Results not yet available")
+    return DocumentResultsResponse.from_row(row)
 
 
 @router.get("", response_model=list[DocumentSummaryResponse])

@@ -27,6 +27,14 @@ class WorkflowResponse(BaseModel):
     tasks: list[TaskResponse]
 
 
+class DocumentResultsResponse(BaseModel):
+    step_results: dict[str, str]  # step_name → blob_key (or resolved value once blob store wired)
+
+    @classmethod
+    def from_row(cls, row: DocumentDetailRow) -> Self:
+        return cls(step_results=row.step_results)
+
+
 class DocumentSummaryResponse(BaseModel):
     document_id: uuid.UUID
     filename: str
