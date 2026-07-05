@@ -23,6 +23,7 @@ _settings = Settings(
     jwt_secret=SECRET,
     jwt_expiry_seconds=3600,
     dev_mode=True,
+    partner_hmac_secret="unused",
 )
 _user = User(id=USER_ID, first_name="Alice", last_name="Test")
 _tenant = Tenant(id=TENANT_ID, name="Acme", user=[_user])
@@ -111,7 +112,8 @@ def test_tenant_isolation_user_from_other_tenant_gets_401(client):
 
 def test_dev_token_endpoint_disabled_in_prod():
     prod_settings = Settings(
-        database_url="unused", jwt_secret=SECRET, jwt_expiry_seconds=3600, dev_mode=False
+        database_url="unused", jwt_secret=SECRET, jwt_expiry_seconds=3600, dev_mode=False,
+        partner_hmac_secret="unused",
     )
     app.dependency_overrides[get_settings] = lambda: prod_settings
     app.dependency_overrides[get_session] = lambda: _mock_session()

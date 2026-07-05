@@ -36,6 +36,7 @@ services:
       DATABASE_URL: postgresql+psycopg://primmo:primmo@postgres:5432/primmo
       JWT_SECRET: dev-secret-change-me
       DEV_MODE: "true"
+      PARTNER_HMAC_SECRET: dev-partner-secret-change-me
     depends_on:
       seed:
         condition: service_completed_successfully

@@ -1,11 +1,12 @@
 from fastapi import Depends, FastAPI
 
 from src.auth import AuthContext, get_current_user
-from src.routers import auth, documents
+from src.routers import auth, dev, documents
 
 app = FastAPI()
 app.include_router(auth.router)
 app.include_router(documents.router)
+app.include_router(dev.router)
 
 
 @app.get("/healthcheck")
