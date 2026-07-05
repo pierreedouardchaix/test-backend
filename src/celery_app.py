@@ -15,10 +15,9 @@ import uuid
 
 from celery import Celery
 
-from src.adapters.in_memory.event_publisher import InMemoryEventPublisher
 from src.adapters.in_memory.task_instance_runner import InMemoryTaskInstanceRunner
 from src.application.pipeline_step_executor import PipelineStepExecutor
-from src.bootstrap import get_blob_store, new_unit_of_work
+from src.bootstrap import get_blob_store, get_event_publisher, new_unit_of_work
 
 # Reads REDIS_URL directly (not via bootstrap.get_settings()): constructing
 # the Celery app happens at import time, so it must not require every other
@@ -31,15 +30,14 @@ celery_app = Celery("primmo", broker=os.environ.get("REDIS_URL", "redis://localh
 
 @celery_app.task(name="pipeline.run_step")
 def run_pipeline_step(tenant_id: str, workflow_id: str, step_name: str) -> None:
-    # No pub/sub yet (step 7 adds Redis) — a fresh InMemoryEventPublisher per
-    # task simply drops every event, consistent with its own contract ("no
-    # subscriber means the event is dropped, the DB row is the source of
-    # truth"). Nothing subscribes to it at this stage regardless of process.
+    # Publishes each transition to Redis (get_event_publisher) so the SSE
+    # endpoint in the API process streams it live — the worker and the API are
+    # separate processes, Redis is the bus between them.
     executor = PipelineStepExecutor(
         uow_factory=new_unit_of_work,
         task_instance_runner=InMemoryTaskInstanceRunner(),
         blob_store=get_blob_store(),
-        event_publisher=InMemoryEventPublisher(),
+        event_publisher=get_event_publisher(),
     )
     newly_ready = executor.execute_step(
         tenant_id=uuid.UUID(tenant_id), workflow_id=uuid.UUID(workflow_id), step_name=step_name

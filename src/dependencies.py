@@ -12,15 +12,19 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from src.adapters.celery.workflow_dispatcher import CeleryWorkflowDispatcher
-from src.adapters.in_memory.event_publisher import InMemoryEventPublisher
 from src.adapters.sql.document_data_source import SqlAlchemyDocumentDataSource
 from src.adapters.sql.unit_of_work import SqlAlchemyUnitOfWork
-from src.bootstrap import get_blob_store, get_session_factory, get_settings, new_unit_of_work
+from src.bootstrap import (
+    get_blob_store,
+    get_event_publisher,
+    get_session_factory,
+    get_settings,
+    new_unit_of_work,
+)
 from src.ports.document_data_source import DocumentDataSource
-from src.ports.event_publisher import EventPublisher
 from src.ports.workflow_dispatcher import WorkflowDispatcher
 
-__all__ = ["get_blob_store", "get_settings"]
+__all__ = ["get_blob_store", "get_event_publisher", "get_settings"]
 
 
 def get_session() -> Generator[Session, None, None]:
@@ -40,11 +44,6 @@ def get_uow() -> SqlAlchemyUnitOfWork:
 @lru_cache(maxsize=1)
 def get_workflow_dispatcher() -> WorkflowDispatcher:
     return CeleryWorkflowDispatcher(get_session_factory())
-
-
-@lru_cache(maxsize=1)
-def get_event_publisher() -> EventPublisher:
-    return InMemoryEventPublisher()
 
 
 def get_document_data_source(session: Session = Depends(get_session)) -> DocumentDataSource:

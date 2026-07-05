@@ -9,9 +9,11 @@ from functools import lru_cache
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.adapters.filesystem.blob_store import FileSystemBlobStore
+from src.adapters.redis.event_publisher import RedisEventPublisher
 from src.adapters.sql.engine import create_db_engine, create_session_factory
 from src.adapters.sql.unit_of_work import SqlAlchemyUnitOfWork
 from src.ports.blob_store import BlobStore
+from src.ports.event_publisher import EventPublisher
 from src.settings import Settings
 
 
@@ -38,3 +40,12 @@ def new_unit_of_work() -> SqlAlchemyUnitOfWork:
 @lru_cache(maxsize=1)
 def get_blob_store() -> BlobStore:
     return FileSystemBlobStore(get_settings().blob_storage_dir)
+
+
+@lru_cache(maxsize=1)
+def get_event_publisher() -> EventPublisher:
+    """Real-time event bus, shared by the API (webhook completion events) and
+    the Celery workers (per-step events) — both PUBLISH to the same Redis so
+    the SSE endpoint sees every transition regardless of which process caused
+    it."""
+    return RedisEventPublisher.from_url(get_settings().redis_url)
