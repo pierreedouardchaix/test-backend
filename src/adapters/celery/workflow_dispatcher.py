@@ -19,6 +19,13 @@ class CeleryWorkflowDispatcher:
         self._session_factory = session_factory
 
     def dispatch(self, workflow_id: uuid.UUID, *, tenant_id: uuid.UUID) -> None:
+        # Reading ready_steps() then enqueuing without a lock is safe *only
+        # because of the calling context*, not intrinsically: this runs exactly
+        # once, right after the workflow is created, before any worker has
+        # touched it — so there is no concurrent writer to race and no risk of
+        # double-dispatching a root. The general anti-double-dispatch guarantee
+        # for the rest of the DAG lives in the optimistic-lock replay inside
+        # PipelineStepExecutor, not here.
         session = self._session_factory()
         try:
             workflow = SqlAlchemyWorkflowRepository(session).get(workflow_id, tenant_id=tenant_id)
