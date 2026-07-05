@@ -1,5 +1,8 @@
-from fastapi import APIRouter, Depends, UploadFile
+import uuid
 
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+
+from src.application.get_document import DocumentNotFound, GetDocumentQuery, GetDocumentUseCase
 from src.application.ingest_document import IngestDocumentCommand, IngestDocumentUseCase
 from src.application.list_documents import ListDocumentsQuery, ListDocumentsUseCase
 from src.application.unit_of_work import UnitOfWork
@@ -8,6 +11,7 @@ from src.dependencies import get_blob_store, get_document_data_source, get_uow, 
 from src.ports.blob_store import BlobStore
 from src.ports.document_data_source import DocumentDataSource
 from src.ports.workflow_dispatcher import WorkflowDispatcher
+from src.routers.schemas import DocumentDetailResponse, DocumentSummaryResponse
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -34,7 +38,22 @@ async def upload_document(
     return {"document_id": str(result.document_id), "workflow_status": result.workflow_status}
 
 
-@router.get("")
+@router.get("/{document_id}", response_model=DocumentDetailResponse)
+def get_document(
+    document_id: uuid.UUID,
+    auth: AuthContext = Depends(get_current_user),
+    data_source: DocumentDataSource = Depends(get_document_data_source),
+):
+    try:
+        row = GetDocumentUseCase(data_source).execute(
+            GetDocumentQuery(document_id=document_id, tenant_id=auth.tenant_id)
+        )
+    except DocumentNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    return DocumentDetailResponse.from_row(row)
+
+
+@router.get("", response_model=list[DocumentSummaryResponse])
 def list_documents(
     auth: AuthContext = Depends(get_current_user),
     data_source: DocumentDataSource = Depends(get_document_data_source),
@@ -42,20 +61,4 @@ def list_documents(
     result = ListDocumentsUseCase(data_source).execute(
         ListDocumentsQuery(tenant_id=auth.tenant_id)
     )
-    return {
-        "documents": [
-            {
-                "document_id": str(doc.document_id),
-                "filename": doc.filename,
-                "content_type": doc.content_type,
-                "size_bytes": doc.size_bytes,
-                "created_at": doc.created_at.isoformat(),
-                "uploaded_by": str(doc.uploaded_by),
-                "uploaded_by_name": f"{doc.uploaded_by_first_name} {doc.uploaded_by_last_name}",
-                "workflow_status": doc.workflow_status,
-                "failed_step": doc.failed_step,
-                "failure_reason": doc.failure_reason,
-            }
-            for doc in result.documents
-        ]
-    }
+    return [DocumentSummaryResponse.from_row(doc) for doc in result.documents]

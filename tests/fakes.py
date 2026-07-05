@@ -4,7 +4,7 @@ import uuid
 from src.domain.models.document import Document
 from src.domain.models.tenant import Tenant
 from src.domain.models.workflow import Workflow
-from src.ports.document_data_source import DocumentRow
+from src.ports.document_data_source import DocumentDetailRow, DocumentRow
 
 
 class FakeWorkflowRepository:
@@ -78,12 +78,22 @@ class FakeDocumentRepository:
 class FakeDocumentDataSource:
     def __init__(self) -> None:
         self._rows: list[DocumentRow] = []
+        self._details: dict[uuid.UUID, DocumentDetailRow] = {}
 
     def list_by_tenant(self, tenant_id: uuid.UUID) -> list[DocumentRow]:
         return [r for r in self._rows if r.tenant_id == tenant_id]
 
+    def get_by_id(self, document_id: uuid.UUID, *, tenant_id: uuid.UUID) -> DocumentDetailRow | None:
+        row = self._details.get(document_id)
+        if row is None or row.tenant_id != tenant_id:
+            return None
+        return row
+
     def add(self, row: DocumentRow) -> None:
         self._rows.append(row)
+
+    def add_detail(self, row: DocumentDetailRow) -> None:
+        self._details[row.document_id] = row
 
 
 class FakeWorkflowDispatcher:
