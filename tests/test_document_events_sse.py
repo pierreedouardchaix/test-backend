@@ -47,6 +47,7 @@ def _detail_row() -> DocumentDetailRow:
         workflow_status="running",
         failed_step=None,
         failure_reason=None,
+        partner_job_id=None,
         step_results={},
         tasks=(),
     )

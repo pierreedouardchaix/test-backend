@@ -46,6 +46,10 @@ class DocumentDetailRow:
     workflow_status: str
     failed_step: str | None
     failure_reason: str | None
+    # The partner's job id for the deferred step, exposed so a tester can copy
+    # it into a webhook payload (the webhook correlates by this id). None until
+    # external_call has handed off.
+    partner_job_id: str | None
     step_results: dict[str, str]  # step_name → blob_key
     tasks: tuple[TaskRow, ...]
 

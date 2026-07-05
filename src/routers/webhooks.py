@@ -8,7 +8,6 @@ does transport: verify, parse, map errors to status codes.
 """
 import json
 from typing import Any
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field, ValidationError
@@ -46,7 +45,7 @@ def _declared_content_length(header_value: str | None) -> int | None:
 
 
 class PartnerWebhookPayload(BaseModel):
-    job_id: UUID
+    job_id: str = Field(max_length=128)  # the partner's opaque job id (j_<hex>), per the README example
     status: str  # "completed" | "failed"
     result: Any | None = None
     error: str | None = Field(default=None, max_length=2000)
@@ -83,7 +82,7 @@ async def partner_webhook(
         )
 
     command = PartnerCallbackCommand(
-        job_id=payload.job_id,
+        partner_job_id=payload.job_id,
         step_name="external_call",
         succeeded=payload.status == "completed",
         result=payload.result,

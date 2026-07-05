@@ -71,6 +71,7 @@ class DocumentDetailResponse(BaseModel):
     created_at: datetime
     uploaded_by: uuid.UUID
     uploaded_by_name: str
+    partner_job_id: str | None  # copy this into a /webhooks/partner payload to test the callback
     workflow: WorkflowResponse
 
     @classmethod
@@ -83,6 +84,7 @@ class DocumentDetailResponse(BaseModel):
             created_at=row.created_at,
             uploaded_by=row.uploaded_by,
             uploaded_by_name=f"{row.uploaded_by_first_name} {row.uploaded_by_last_name}",
+            partner_job_id=row.partner_job_id,
             workflow=WorkflowResponse(
                 status=row.workflow_status,
                 failed_step=row.failed_step,

@@ -14,6 +14,7 @@ from tests.fakes import FakeBlobStore, FakeEventPublisher, FakeUnitOfWork
 
 SECRET = "partner-secret"
 TENANT = uuid.uuid4()
+PARTNER_JOB_ID = "j_abc123def4567890"  # the partner's opaque job id, correlation key on the webhook
 
 _settings = Settings(
     database_url="unused",
@@ -24,12 +25,13 @@ _settings = Settings(
 )
 
 
-def _workflow_awaiting_callback(job_id: uuid.UUID) -> Workflow:
-    wf = Workflow.create(id=job_id, tenant_id=TENANT, definition=PRIMMO_DEFINITION)
+def _workflow_awaiting_callback(workflow_id: uuid.UUID) -> Workflow:
+    wf = Workflow.create(id=workflow_id, tenant_id=TENANT, definition=PRIMMO_DEFINITION)
     for step in ("ocr", "metadata", "chunking"):
         wf.start_task(step)
         wf.on_task_succeeded(step, f"blob-{step}")
     wf.start_task("external_call")
+    wf.mark_task_deferred("external_call", PARTNER_JOB_ID)
     return wf
 
 
@@ -51,7 +53,7 @@ def test_signed_completed_callback_makes_document_ready():
     uow = FakeUnitOfWork()
     uow.workflows.save(_workflow_awaiting_callback(job_id))
     try:
-        r = _post_signed(_client(uow), {"job_id": str(job_id), "status": "completed", "result": {"indexed": True}})
+        r = _post_signed(_client(uow), {"job_id": PARTNER_JOB_ID, "status": "completed", "result": {"indexed": True}})
     finally:
         app.dependency_overrides.clear()
 
@@ -66,7 +68,7 @@ def test_invalid_signature_is_401():
     uow.workflows.save(_workflow_awaiting_callback(job_id))
     try:
         client = _client(uow)
-        raw = json.dumps({"job_id": str(job_id), "status": "completed"}).encode()
+        raw = json.dumps({"job_id": PARTNER_JOB_ID, "status": "completed"}).encode()
         r = client.post("/webhooks/partner", content=raw, headers={"X-Partner-Signature": "deadbeef"})
     finally:
         app.dependency_overrides.clear()
@@ -79,7 +81,7 @@ def test_invalid_signature_is_401():
 def test_unknown_job_id_is_404():
     uow = FakeUnitOfWork()  # empty
     try:
-        r = _post_signed(_client(uow), {"job_id": str(uuid.uuid4()), "status": "completed"})
+        r = _post_signed(_client(uow), {"job_id": "j_does_not_exist", "status": "completed"})
     finally:
         app.dependency_overrides.clear()
 
@@ -92,7 +94,7 @@ def test_replayed_callback_is_200_without_reprocessing():
     uow.workflows.save(_workflow_awaiting_callback(job_id))
     try:
         client = _client(uow)
-        body = {"job_id": str(job_id), "status": "completed", "result": {"n": 1}}
+        body = {"job_id": PARTNER_JOB_ID, "status": "completed", "result": {"n": 1}}
         first = _post_signed(client, body)
         second = _post_signed(client, body)
     finally:
@@ -108,7 +110,7 @@ def test_failed_callback_marks_document_failed():
     uow = FakeUnitOfWork()
     uow.workflows.save(_workflow_awaiting_callback(job_id))
     try:
-        r = _post_signed(_client(uow), {"job_id": str(job_id), "status": "failed", "error": "partner boom"})
+        r = _post_signed(_client(uow), {"job_id": PARTNER_JOB_ID, "status": "failed", "error": "partner boom"})
     finally:
         app.dependency_overrides.clear()
 
@@ -139,7 +141,7 @@ def test_error_field_truncated_above_2000_chars_is_422():
     uow = FakeUnitOfWork()
     uow.workflows.save(_workflow_awaiting_callback(job_id))
     try:
-        r = _post_signed(_client(uow), {"job_id": str(job_id), "status": "failed", "error": "x" * 2001})
+        r = _post_signed(_client(uow), {"job_id": PARTNER_JOB_ID, "status": "failed", "error": "x" * 2001})
     finally:
         app.dependency_overrides.clear()
 

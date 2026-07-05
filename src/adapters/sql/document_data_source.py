@@ -70,6 +70,8 @@ class SqlAlchemyDocumentDataSource:
             workflow_status=wf.status,
             failed_step=wf.failed_step,
             failure_reason=wf.failure_reason,
+            # At most one task carries a partner job id (the deferred external_call).
+            partner_job_id=next((t.partner_job_id for t in task_rows if t.partner_job_id is not None), None),
             step_results=wf.results or {},
             tasks=tuple(
                 TaskRow(

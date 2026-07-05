@@ -1,4 +1,3 @@
-import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,12 +10,12 @@ from src.ports.event_publisher import EventPublisher
 
 
 class WorkflowNotFound(Exception):
-    """No workflow matches the callback's job_id → the endpoint answers 404."""
+    """No task matches the callback's partner_job_id → the endpoint answers 404."""
 
 
 @dataclass(frozen=True)
 class PartnerCallbackCommand:
-    job_id: uuid.UUID  # == document/workflow id (see dev_considerations.md)
+    partner_job_id: str  # the partner's opaque job id (j_<hex>), the correlation key
     step_name: str  # which step the callback completes — injected by the endpoint
     succeeded: bool
     result: Any | None = None  # the partner's payload, when succeeded
@@ -35,9 +34,9 @@ class ApplyPartnerCallbackUseCase(WriteUseCase[PartnerCallbackCommand, PartnerCa
 
     Idempotent by design: the partner retries on non-2xx, so a callback that
     lands after the step is already terminal is a silent no-op (the endpoint
-    still answers 200). The workflow id is the correlation key and is globally
-    unique, so the tenant is resolved from the stored workflow, never trusted
-    from the request body.
+    still answers 200). Correlation is by the partner's own job id (unique
+    across tasks); the tenant and our workflow id are resolved from the stored
+    workflow, never trusted from the request body.
     """
 
     def __init__(self, uow: UnitOfWork, blob_store: BlobStore, event_publisher: EventPublisher) -> None:
@@ -46,9 +45,9 @@ class ApplyPartnerCallbackUseCase(WriteUseCase[PartnerCallbackCommand, PartnerCa
         self._events = event_publisher
 
     def _execute(self, command: PartnerCallbackCommand) -> PartnerCallbackResult:
-        workflow = self._uow.workflows.get_by_id(command.job_id)
+        workflow = self._uow.workflows.get_by_partner_job_id(command.partner_job_id)
         if workflow is None:
-            raise WorkflowNotFound(command.job_id)
+            raise WorkflowNotFound(command.partner_job_id)
 
         # Already terminal → this callback was handled (or superseded) already.
         if workflow.status != WorkflowStatus.RUNNING:
@@ -56,20 +55,21 @@ class ApplyPartnerCallbackUseCase(WriteUseCase[PartnerCallbackCommand, PartnerCa
 
         orchestrator = WorkflowOrchestrator(self._uow.workflows, self._blob_store, self._events)
         tenant_id = workflow.tenant_id
+        workflow_id = workflow.id
         if command.succeeded:
             orchestrator.handle_step_success(
                 tenant_id=tenant_id,
-                workflow_id=command.job_id,
+                workflow_id=workflow_id,
                 step_name=command.step_name,
                 result=command.result,
             )
         else:
             orchestrator.handle_terminal_failure(
                 tenant_id=tenant_id,
-                workflow_id=command.job_id,
+                workflow_id=workflow_id,
                 step_name=command.step_name,
                 error=command.error or "partner reported failure",
             )
 
-        updated = self._uow.workflows.get_by_id(command.job_id)
+        updated = self._uow.workflows.get_by_id(workflow_id)
         return PartnerCallbackResult(workflow_status=updated.status.value, already_processed=False)

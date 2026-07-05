@@ -21,6 +21,7 @@ def _detail(
     failed_step: str | None = None,
     failure_reason: str | None = None,
     step_results: dict | None = None,
+    partner_job_id: str | None = None,
 ) -> DocumentDetailRow:
     return DocumentDetailRow(
         document_id=document_id,
@@ -35,6 +36,7 @@ def _detail(
         workflow_status=workflow_status,
         failed_step=failed_step,
         failure_reason=failure_reason,
+        partner_job_id=partner_job_id,
         step_results=step_results or {},
         tasks=tasks,
     )
@@ -62,6 +64,15 @@ def test_returns_document_detail():
     assert result.filename == "invoice.pdf"
     assert result.uploaded_by_first_name == "Alice"
     assert result.uploaded_by_last_name == "Smith"
+
+
+def test_exposes_partner_job_id_for_the_webhook_tester():
+    ds = FakeDocumentDataSource()
+    ds.add_detail(_detail(partner_job_id="j_abc123def4567890"))
+
+    result = GetDocumentUseCase(ds).execute(GetDocumentQuery(document_id=DOC_ID, tenant_id=TENANT_A))
+
+    assert result.partner_job_id == "j_abc123def4567890"
 
 
 def test_returns_workflow_status():
