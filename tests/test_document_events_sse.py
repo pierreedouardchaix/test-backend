@@ -101,6 +101,33 @@ def test_streams_events_until_the_stream_ends():
     assert _data_payloads(r.text) == events
 
 
+class _ExplodingEventStream:
+    """Fails the test if the endpoint subscribes — used to prove the
+    already-terminal short-circuit never reaches the live subscription."""
+
+    @asynccontextmanager
+    async def subscribe(self, *, tenant_id, document_id):
+        raise AssertionError("must not subscribe when the workflow is already terminal")
+        yield  # pragma: no cover
+
+
+def test_already_terminal_workflow_emits_terminal_once_and_closes():
+    """Regression: a client connecting on an already-finished workflow would
+    hang forever (no further event will be published, the terminal check never
+    fires). It must instead receive the terminal status once and close."""
+    row = _detail_row()
+    terminal_row = DocumentDetailRow(**{**row.__dict__, "workflow_status": "succeeded"})
+    try:
+        client = _client(reader=lambda doc_id, tenant_id: terminal_row, event_stream=_ExplodingEventStream())
+        r = client.get(f"/documents/{DOC_ID}/events?token=x")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert r.status_code == 200
+    payloads = _data_payloads(r.text)
+    assert payloads == [{"workflow_status": "succeeded", "failed_step": None, "failure_reason": None}]
+
+
 def test_closes_at_terminal_status_ignoring_later_events():
     events = [
         {"step": "external_call", "step_status": "running", "workflow_status": "running"},

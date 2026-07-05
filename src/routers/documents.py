@@ -103,10 +103,23 @@ async def stream_document_events(
     state on connect reads GET /documents/{id} first, then opens this stream
     for live deltas.
     """
-    if read_document(document_id, auth.tenant_id) is None:
+    row = read_document(document_id, auth.tenant_id)
+    if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
     async def event_generator():
+        # Already terminal before the client connected: no further event will
+        # ever be published, so a live-only subscription would hang forever.
+        # Emit the current terminal status once so the client sees it and
+        # closes, then stop — instead of subscribing to a silent channel.
+        if row.workflow_status in _TERMINAL_STATUSES:
+            yield {"event": "step", "data": json.dumps({
+                "workflow_status": row.workflow_status,
+                "failed_step": row.failed_step,
+                "failure_reason": row.failure_reason,
+            })}
+            return
+
         async with event_stream.subscribe(tenant_id=auth.tenant_id, document_id=document_id) as events:
             async for event in events:
                 yield {"event": "step", "data": json.dumps(event)}
