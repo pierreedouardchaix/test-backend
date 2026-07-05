@@ -1,8 +1,14 @@
+import uuid
 from typing import Protocol, Self
 
 from src.ports.document_repository import DocumentRepository
 from src.ports.tenant_repository import TenantRepository
 from src.ports.workflow_repository import WorkflowRepository
+
+# scope_to_tenant marker for tenant-less ingress (partner webhook resolves a
+# workflow across tenants). Lives here, on the port, not in the SQL adapter, so
+# use cases can express "cross-tenant" without importing persistence.
+CROSS_TENANT = "*"
 
 
 class UnitOfWork(Protocol):
@@ -20,6 +26,11 @@ class UnitOfWork(Protocol):
     def __enter__(self) -> Self: ...
 
     def __exit__(self, exc_type, exc, tb) -> None: ...
+
+    def scope_to_tenant(self, tenant: uuid.UUID | str) -> None:
+        """Bind this UoW to a tenant for row-level security (or a bypass
+        sentinel for cross-tenant ingress). Call before any query."""
+        ...
 
     def commit(self) -> None: ...
 

@@ -2,6 +2,7 @@ import uuid
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from src.adapters.sql.rls import scope_session_to_tenant
 from src.adapters.sql.workflow_repository import SqlAlchemyWorkflowRepository
 from src.celery_app import run_pipeline_step
 
@@ -28,6 +29,7 @@ class CeleryWorkflowDispatcher:
         # PipelineStepExecutor, not here.
         session = self._session_factory()
         try:
+            scope_session_to_tenant(session, tenant_id)  # RLS
             workflow = SqlAlchemyWorkflowRepository(session).get(workflow_id, tenant_id=tenant_id)
             ready_steps = workflow.ready_steps()
         finally:

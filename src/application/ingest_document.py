@@ -49,6 +49,7 @@ class IngestDocumentUseCase(WriteUseCase[IngestDocumentCommand, IngestDocumentRe
         self._dispatcher.dispatch(result.document_id, tenant_id=command.tenant_id)
 
     def _execute(self, command: IngestDocumentCommand) -> IngestDocumentResult:
+        self._uow.scope_to_tenant(command.tenant_id)  # RLS: writes scoped to this tenant
         blob_key = self._blob_store.put(
             command.file_content, content_type=command.content_type
         )

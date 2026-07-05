@@ -34,7 +34,8 @@ services:
       - .:/app
       - blob_data:/data/blobs
     environment:
-      DATABASE_URL: postgresql+psycopg://primmo:primmo@postgres:5432/primmo
+      # Non-superuser role so Postgres RLS actually applies (superusers/owners bypass it).
+      DATABASE_URL: postgresql+psycopg://primmo_app:primmo_app@postgres:5432/primmo
       JWT_SECRET: dev-secret-change-me
       DEV_MODE: "true"
       PARTNER_HMAC_SECRET: dev-partner-secret-change-me
@@ -53,7 +54,8 @@ services:
       - .:/app
       - blob_data:/data/blobs
     environment:
-      DATABASE_URL: postgresql+psycopg://primmo:primmo@postgres:5432/primmo
+      # Non-superuser role so Postgres RLS actually applies (superusers/owners bypass it).
+      DATABASE_URL: postgresql+psycopg://primmo_app:primmo_app@postgres:5432/primmo
       JWT_SECRET: dev-secret-change-me
       DEV_MODE: "true"
       PARTNER_HMAC_SECRET: dev-partner-secret-change-me

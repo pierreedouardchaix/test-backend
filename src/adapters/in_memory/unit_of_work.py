@@ -27,6 +27,9 @@ class InMemoryUnitOfWork:
     def __exit__(self, exc_type, exc, tb) -> None:
         pass
 
+    def scope_to_tenant(self, tenant) -> None:
+        pass  # no RLS without a real DB
+
     def commit(self) -> None:
         pass
 

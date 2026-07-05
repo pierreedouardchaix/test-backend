@@ -2,7 +2,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.application.unit_of_work import UnitOfWork
+from src.application.unit_of_work import CROSS_TENANT, UnitOfWork
 from src.application.workflow_orchestrator import WorkflowOrchestrator
 from src.application.write_use_case import WriteUseCase
 from src.domain.errors import DomainError
@@ -61,6 +61,10 @@ class ApplyPartnerCallbackUseCase(WriteUseCase[PartnerCallbackCommand, PartnerCa
         self._events = event_publisher
 
     def _execute(self, command: PartnerCallbackCommand) -> PartnerCallbackResult:
+        # Cross-tenant ingress: the partner has no tenant context, correlation is
+        # by its job id alone. RLS bypass for the resolve; the write then targets
+        # the resolved workflow's own tenant (enforced at the application level).
+        self._uow.scope_to_tenant(CROSS_TENANT)
         workflow = self._uow.workflows.get_by_partner_job_id(command.partner_job_id)
         if workflow is None:
             raise WorkflowNotFound(command.partner_job_id)

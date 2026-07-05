@@ -15,8 +15,10 @@ from src.adapters.redis.event_publisher import RedisEventPublisher
 from src.adapters.redis.event_stream import RedisEventStream
 from src.adapters.sql.document_data_source import SqlAlchemyDocumentDataSource
 from src.adapters.sql.engine import create_db_engine, create_session_factory
+from src.adapters.sql.rls import scope_session_to_tenant
 from src.adapters.sql.unit_of_work import SqlAlchemyUnitOfWork
 from src.adapters.sql.workflow_repository import SqlAlchemyWorkflowRepository
+from src.application.unit_of_work import CROSS_TENANT
 from src.ports.blob_store import BlobStore
 from src.ports.document_data_source import DocumentDetailRow
 from src.ports.event_publisher import EventPublisher
@@ -82,9 +84,13 @@ def read_document_detail(document_id: uuid.UUID, tenant_id: uuid.UUID) -> Docume
 def partner_job_exists(partner_job_id: str) -> bool:
     """Whether a task with this partner job id is on record — the webhook's
     synchronous 404 gate. Short-session read (open → read → close): the webhook
-    only needs existence, not to hold a session while it enqueues."""
+    only needs existence, not to hold a session while it enqueues.
+
+    Cross-tenant by nature (the partner has no tenant context), so RLS is scoped
+    to the bypass sentinel for this lookup."""
     session = get_session_factory()()
     try:
+        scope_session_to_tenant(session, CROSS_TENANT)
         return SqlAlchemyWorkflowRepository(session).get_by_partner_job_id(partner_job_id) is not None
     finally:
         session.close()

@@ -3,6 +3,8 @@ import os
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from src.adapters.sql import rls  # noqa: F401 — registers the RLS after_begin listener on import
+
 _LOCAL_DEFAULT = "postgresql+psycopg://primmo:primmo@localhost:5432/primmo"
 
 

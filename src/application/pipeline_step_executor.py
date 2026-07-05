@@ -81,6 +81,7 @@ class PipelineStepExecutor:
         key of each dependency's output — `{dep: blob_key}` — for _resolve_inputs
         to materialize."""
         with self._uow_factory() as uow:
+            uow.scope_to_tenant(tenant_id)  # RLS: this step's writes/reads scoped to its tenant
             orchestrator = WorkflowOrchestrator(uow.workflows, self._blob_store, self._events)
             orchestrator.start_task(tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name)
             workflow = uow.workflows.get(workflow_id, tenant_id=tenant_id)
@@ -90,6 +91,7 @@ class PipelineStepExecutor:
 
     def _defer(self, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID, step_name: str, partner_job_id: str) -> None:
         with self._uow_factory() as uow:
+            uow.scope_to_tenant(tenant_id)  # RLS: this step's writes/reads scoped to its tenant
             orchestrator = WorkflowOrchestrator(uow.workflows, self._blob_store, self._events)
             orchestrator.handle_step_deferred(
                 tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name, partner_job_id=partner_job_id
@@ -98,6 +100,7 @@ class PipelineStepExecutor:
 
     def _fail(self, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID, step_name: str, error: str) -> TaskStatus:
         with self._uow_factory() as uow:
+            uow.scope_to_tenant(tenant_id)  # RLS: this step's writes/reads scoped to its tenant
             orchestrator = WorkflowOrchestrator(uow.workflows, self._blob_store, self._events)
             status = orchestrator.handle_step_failure(
                 tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name, error=error
@@ -107,6 +110,7 @@ class PipelineStepExecutor:
 
     def _succeed(self, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID, step_name: str, result: Any) -> frozenset[str]:
         with self._uow_factory() as uow:
+            uow.scope_to_tenant(tenant_id)  # RLS: this step's writes/reads scoped to its tenant
             orchestrator = WorkflowOrchestrator(uow.workflows, self._blob_store, self._events)
             ready_steps = orchestrator.handle_step_success(
                 tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name, result=result

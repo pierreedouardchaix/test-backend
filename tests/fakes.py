@@ -138,12 +138,16 @@ class FakeUnitOfWork:
         self.documents = FakeDocumentRepository()
         self.workflows = FakeWorkflowRepository()
         self.committed = False
+        self.scoped_tenant = None
 
     def __enter__(self) -> "FakeUnitOfWork":
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
         pass
+
+    def scope_to_tenant(self, tenant) -> None:
+        self.scoped_tenant = tenant  # recorded so tests can assert on it; no RLS in-memory
 
     def commit(self) -> None:
         self.committed = True

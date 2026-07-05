@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.adapters.sql.models import DocumentORM, TaskORM, UserORM, WorkflowORM
+from src.adapters.sql.rls import scope_session_to_tenant
 from src.ports.document_data_source import DocumentDetailRow, DocumentRow, TaskRow
 
 
@@ -12,6 +13,7 @@ class SqlAlchemyDocumentDataSource:
         self._session = session
 
     def list_by_tenant(self, tenant_id: uuid.UUID, *, limit: int, offset: int) -> list[DocumentRow]:
+        scope_session_to_tenant(self._session, tenant_id)  # RLS
         rows = self._session.execute(
             select(DocumentORM, WorkflowORM, UserORM)
             .join(WorkflowORM, WorkflowORM.id == DocumentORM.id)
@@ -41,6 +43,7 @@ class SqlAlchemyDocumentDataSource:
         ]
 
     def get_by_id(self, document_id: uuid.UUID, *, tenant_id: uuid.UUID) -> DocumentDetailRow | None:
+        scope_session_to_tenant(self._session, tenant_id)  # RLS
         row = self._session.execute(
             select(DocumentORM, WorkflowORM, UserORM)
             .join(WorkflowORM, WorkflowORM.id == DocumentORM.id)
