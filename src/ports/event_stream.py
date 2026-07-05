@@ -1,20 +1,24 @@
 import uuid
+from contextlib import AbstractAsyncContextManager
 from typing import Any, AsyncIterator, Protocol
 
 
 class EventStream(Protocol):
     """Read side of the real-time transport — the consuming counterpart of
-    EventPublisher. Yields a document's status-change events as they are
+    EventPublisher. Streams a document's status-change events as they are
     published, for as long as the caller keeps iterating.
 
     Async because the SSE endpoint holds one long-lived subscription per
-    connected client on the event loop (never a threadpool thread). The
-    returned iterator must clean up its underlying subscription/connection
-    when the caller stops iterating (client disconnect, terminal status)."""
+    connected client on the event loop (never a threadpool thread).
+
+    `subscribe` is an async context manager: the subscription is established on
+    entry (so the caller can read its DB snapshot afterwards with no gap), and
+    the underlying subscription/connection is released on exit (client
+    disconnect, terminal status, or exception)."""
 
     def subscribe(
         self, *, tenant_id: uuid.UUID, document_id: uuid.UUID
-    ) -> AsyncIterator[dict[str, Any]]:
-        """Yield each event published for this document, in arrival order,
-        until the caller stops consuming the iterator."""
+    ) -> AbstractAsyncContextManager[AsyncIterator[dict[str, Any]]]:
+        """Enter to establish the subscription; the yielded iterator produces
+        each event published for this document, in arrival order."""
         ...

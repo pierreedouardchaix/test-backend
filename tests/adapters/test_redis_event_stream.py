@@ -58,7 +58,8 @@ def test_skips_control_frames_and_yields_decoded_events(monkeypatch):
 
     async def collect():
         stream = RedisEventStream("redis://unused")
-        return [event async for event in stream.subscribe(tenant_id=uuid.uuid4(), document_id=uuid.uuid4())]
+        async with stream.subscribe(tenant_id=uuid.uuid4(), document_id=uuid.uuid4()) as events:
+            return [event async for event in events]
 
     events = asyncio.run(collect())
 
@@ -66,7 +67,9 @@ def test_skips_control_frames_and_yields_decoded_events(monkeypatch):
         {"step": "ocr", "step_status": "running"},
         {"step": "ocr", "step_status": "succeeded"},
     ]
-    # cleanup ran when the iterator was exhausted
+    # the subscription was established on context entry...
+    assert pubsub.subscribed is not None
+    # ...and released on exit
     assert pubsub.unsubscribed == pubsub.subscribed
     assert pubsub.closed is True
     assert client.closed is True
