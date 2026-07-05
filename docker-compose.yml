@@ -46,6 +46,25 @@ services:
       redis:
         condition: service_healthy
 
+  worker:
+    build: .
+    command: ["celery", "-A", "src.celery_app", "worker", "--loglevel=info"]
+    volumes:
+      - .:/app
+      - blob_data:/data/blobs
+    environment:
+      DATABASE_URL: postgresql+psycopg://primmo:primmo@postgres:5432/primmo
+      JWT_SECRET: dev-secret-change-me
+      DEV_MODE: "true"
+      PARTNER_HMAC_SECRET: dev-partner-secret-change-me
+      REDIS_URL: redis://redis:6379/0
+      BLOB_STORAGE_DIR: /data/blobs
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
   postgres:
     image: postgres:17
     environment:
