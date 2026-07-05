@@ -95,33 +95,38 @@ async def stream_document_events(
     Auth is via `?token=` (the browser's EventSource can't set an Authorization
     header). The ownership check below is the tenant-isolation gate: a client
     can only stream a document its own tenant owns (404 otherwise, without
-    leaking existence). Then it subscribes to the document's Redis channel and
-    forwards each event the workers/webhook publish, closing once the workflow
-    reaches a terminal status.
+    leaking existence).
 
-    No initial snapshot (see dev_considerations.md): a client wanting current
-    state on connect reads GET /documents/{id} first, then opens this stream
-    for live deltas.
+    Ordering that closes the connect-time gap: subscribe FIRST, then read the
+    DB snapshot. Any event published while the snapshot is read is buffered by
+    the live subscription (a harmless duplicate), never lost. The snapshot goes
+    out as the first `event: snapshot` (current status + monotonic version), so
+    a client is consistent on connect without a separate GET. If already
+    terminal, the snapshot is the whole stream — no hang waiting on a silent
+    channel. Live `event: step` deltas follow; any event at or below the
+    snapshot version is dropped (already reflected). Close on terminal status.
     """
-    row = read_document(document_id, auth.tenant_id)
-    if row is None:
+    if read_document(document_id, auth.tenant_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
     async def event_generator():
-        # Already terminal before the client connected: no further event will
-        # ever be published, so a live-only subscription would hang forever.
-        # Emit the current terminal status once so the client sees it and
-        # closes, then stop — instead of subscribing to a silent channel.
-        if row.workflow_status in _TERMINAL_STATUSES:
-            yield {"event": "step", "data": json.dumps({
-                "workflow_status": row.workflow_status,
-                "failed_step": row.failed_step,
-                "failure_reason": row.failure_reason,
-            })}
-            return
-
         async with event_stream.subscribe(tenant_id=auth.tenant_id, document_id=document_id) as events:
+            snapshot = read_document(document_id, auth.tenant_id)
+            if snapshot is None:
+                return  # vanished between the two reads (documents aren't deleted) — nothing to stream
+            snapshot_version = snapshot.workflow_version
+            yield {"event": "snapshot", "data": json.dumps({
+                "workflow_status": snapshot.workflow_status,
+                "version": snapshot_version,
+                "failed_step": snapshot.failed_step,
+                "failure_reason": snapshot.failure_reason,
+            })}
+            if snapshot.workflow_status in _TERMINAL_STATUSES:
+                return
+
             async for event in events:
+                if event.get("version", 0) <= snapshot_version:
+                    continue  # already reflected in the snapshot (older or duplicate)
                 yield {"event": "step", "data": json.dumps(event)}
                 if event.get("workflow_status") in _TERMINAL_STATUSES:
                     return
