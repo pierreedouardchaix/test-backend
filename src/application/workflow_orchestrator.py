@@ -89,7 +89,7 @@ class WorkflowOrchestrator:
 
         version = self._workflow_repository.save(workflow)
         self._publish(tenant_id=tenant_id, workflow=workflow, step_name=step_name, version=version)
-        return workflow.tasks[step_name].status
+        return workflow.get_task(step_name).status
 
     def handle_step_deferred(
         self,
@@ -119,7 +119,7 @@ class WorkflowOrchestrator:
         (the partner webhook) — no retry, the workflow becomes terminal."""
         workflow = self._require_workflow(workflow_id, tenant_id=tenant_id)
 
-        workflow.on_callback_failed(step_name, error)
+        workflow.on_task_failed_terminally(step_name, error)
 
         version = self._workflow_repository.save(workflow)
         self._publish(tenant_id=tenant_id, workflow=workflow, step_name=step_name, version=version)
@@ -131,7 +131,7 @@ class WorkflowOrchestrator:
         return workflow
 
     def _publish(self, *, tenant_id: uuid.UUID, workflow, step_name: str, version: int) -> None:
-        task = workflow.tasks[step_name]
+        task = workflow.get_task(step_name)
         event = {
             "step": step_name,
             "step_status": task.status,

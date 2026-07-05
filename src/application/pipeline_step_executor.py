@@ -44,10 +44,10 @@ class PipelineStepExecutor:
         self._events = event_publisher
 
     def execute_step(self, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID, step_name: str) -> frozenset[str]:
-        depends_on, results = run_with_retry(
+        input_blob_keys = run_with_retry(
             lambda: self._start(tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name)
         )
-        inputs = self._resolve_inputs(results, depends_on)
+        inputs = self._resolve_inputs(input_blob_keys)
 
         try:
             result = self._task_instance_runner.run_step(
@@ -76,14 +76,17 @@ class PipelineStepExecutor:
             lambda: self._succeed(tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name, result=result)
         )
 
-    def _start(self, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID, step_name: str) -> tuple[frozenset[str], dict[str, str]]:
+    def _start(self, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID, step_name: str) -> dict[str, str]:
+        """Mark the step started (committed before it runs) and return the blob
+        key of each dependency's output — `{dep: blob_key}` — for _resolve_inputs
+        to materialize."""
         with self._uow_factory() as uow:
             orchestrator = WorkflowOrchestrator(uow.workflows, self._blob_store, self._events)
             orchestrator.start_task(tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name)
             workflow = uow.workflows.get(workflow_id, tenant_id=tenant_id)
             uow.commit()
-            step = workflow.definition.get_step(step_name)
-            return step.depends_on, dict(workflow.results)
+            step = workflow.get_step(step_name)
+            return {dep: workflow.results[dep] for dep in step.depends_on}
 
     def _defer(self, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID, step_name: str, partner_job_id: str) -> None:
         with self._uow_factory() as uow:
@@ -111,7 +114,7 @@ class PipelineStepExecutor:
             uow.commit()
             return ready_steps
 
-    def _resolve_inputs(self, results: dict[str, str], depends_on: frozenset[str]) -> dict[str, Any]:
-        """Dependency outputs are blob keys on Workflow.results — materialize
-        them into real values before handing them to the TaskInstanceRunner."""
-        return {dep: json.loads(self._blob_store.get(results[dep])) for dep in depends_on}
+    def _resolve_inputs(self, input_blob_keys: dict[str, str]) -> dict[str, Any]:
+        """Dependency outputs are blob keys — materialize them into real values
+        before handing them to the TaskInstanceRunner."""
+        return {dep: json.loads(self._blob_store.get(key)) for dep, key in input_blob_keys.items()}

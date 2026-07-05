@@ -6,7 +6,7 @@ from typing import Any, Self
 
 from src.domain.errors import TaskNotFound
 from src.domain.models.task import Task
-from src.domain.models.workflow_definition import WorkflowDefinition
+from src.domain.models.workflow_definition import StepDefinition, WorkflowDefinition
 
 
 class WorkflowStatus(StrEnum):
@@ -68,12 +68,26 @@ class Workflow:
         if self.completed_steps() == self.definition.step_names():
             self.status = WorkflowStatus.SUCCEEDED
 
-    def mark_step_failed(self, step_name: str, reason: str) -> None:
+    def mark_failed(self, *, caused_by_step: str, reason: str) -> None:
+        """Mark the whole workflow failed, attributing it to a step."""
         if self.status != WorkflowStatus.RUNNING:
             raise ValueError(f"Cannot fail a workflow that is already {self.status}")
         self.status = WorkflowStatus.FAILED
-        self.failed_step = step_name
+        self.failed_step = caused_by_step
         self.failure_reason = reason
+
+    def get_step(self, step_name: str) -> StepDefinition:
+        """Façade over the definition so callers holding a Workflow don't reach
+        through `workflow.definition` for a step's static shape."""
+        return self.definition.get_step(step_name)
+
+    def get_task(self, step_name: str) -> Task:
+        """The Task for a step. Raises TaskNotFound if it was never dispatched —
+        the single guarded accessor, so callers never index `workflow.tasks`."""
+        task = self.tasks.get(step_name)
+        if task is None:
+            raise TaskNotFound(f"No task has been dispatched yet for step {step_name!r}")
+        return task
 
     def start_task(self, step_name: str) -> Task:
         """Get the Task for a step ready to run — create it on first start,
@@ -88,7 +102,7 @@ class Workflow:
 
         task = self.tasks.get(step_name)
         if task is None:
-            step = self.definition.get_step(step_name)
+            step = self.get_step(step_name)
             task = Task.create(workflow_id=self.id, step_name=step_name, max_attempts=step.max_attempts)
             self.tasks[step_name] = task
 
@@ -100,7 +114,7 @@ class Workflow:
         unblocked (fan-out/fan-in resolved here)."""
         if self.status != WorkflowStatus.RUNNING:
             raise ValueError(f"Cannot apply a task outcome on a workflow that is {self.status}")
-        self._require_task(step_name).succeed()
+        self.get_task(step_name).succeed()
         self.record_step_result(step_name, result)
         return self.ready_steps()
 
@@ -111,9 +125,9 @@ class Workflow:
         exhausted) reaches the workflow."""
         if self.status != WorkflowStatus.RUNNING:
             raise ValueError(f"Cannot apply a task outcome on a workflow that is {self.status}")
-        can_retry = self._require_task(step_name).fail(error)
+        can_retry = self.get_task(step_name).fail(error)
         if not can_retry:
-            self.mark_step_failed(step_name, error)
+            self.mark_failed(caused_by_step=step_name, reason=error)
 
     def mark_task_deferred(self, step_name: str, partner_job_id: str) -> None:
         """Attach the external correlation id to a step that has just handed off
@@ -121,19 +135,13 @@ class Workflow:
         unchanged — this only records how to correlate the incoming webhook."""
         if self.status != WorkflowStatus.RUNNING:
             raise ValueError(f"Cannot defer a task on a workflow that is {self.status}")
-        self._require_task(step_name).mark_deferred(partner_job_id)
+        self.get_task(step_name).mark_deferred(partner_job_id)
 
-    def on_callback_failed(self, step_name: str, error: str) -> None:
-        """Apply a terminal failure reported by an external callback (the
-        partner webhook). Unlike on_task_failed this never retries — the
-        external authority has already decided the outcome is final."""
+    def on_task_failed_terminally(self, step_name: str, error: str) -> None:
+        """Apply a terminal failure declared by an external authority (the
+        partner webhook). Unlike on_task_failed this never retries — the outcome
+        is already final."""
         if self.status != WorkflowStatus.RUNNING:
             raise ValueError(f"Cannot apply a task outcome on a workflow that is {self.status}")
-        self._require_task(step_name).fail_terminally(error)
-        self.mark_step_failed(step_name, error)
-
-    def _require_task(self, step_name: str) -> Task:
-        task = self.tasks.get(step_name)
-        if task is None:
-            raise TaskNotFound(f"No task has been dispatched yet for step {step_name!r}")
-        return task
+        self.get_task(step_name).fail_terminally(error)
+        self.mark_failed(caused_by_step=step_name, reason=error)

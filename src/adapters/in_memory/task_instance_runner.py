@@ -1,8 +1,12 @@
 import uuid
-from typing import Any
+from typing import Any, Protocol
 
 from src import agents
 from src.ports.task_instance_runner import Deferred
+
+
+class StepHandler(Protocol):
+    def __call__(self, *, document_id: uuid.UUID, tenant_id: uuid.UUID, inputs: dict[str, Any]) -> Any: ...
 
 
 class InMemoryTaskInstanceRunner:
@@ -17,7 +21,7 @@ class InMemoryTaskInstanceRunner:
     its outcome via WorkflowOrchestrator."""
 
     def __init__(self) -> None:
-        self._handlers = {
+        self._handlers: dict[str, StepHandler] = {
             "ocr": self._ocr,
             "metadata": self._metadata,
             "chunking": self._chunking,

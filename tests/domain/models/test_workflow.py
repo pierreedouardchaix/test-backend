@@ -138,7 +138,7 @@ def test_cannot_mutate_a_failed_workflow():
     with pytest.raises(ValueError):
         workflow.record_step_result("t2", "r2")
     with pytest.raises(ValueError):
-        workflow.mark_step_failed("t2", "boom again")
+        workflow.mark_failed(caused_by_step="t2", reason="boom again")
 
 
 def test_cannot_mutate_a_succeeded_workflow():
@@ -150,7 +150,7 @@ def test_cannot_mutate_a_succeeded_workflow():
     with pytest.raises(ValueError):
         workflow.record_step_result("t1", "again")
     with pytest.raises(ValueError):
-        workflow.mark_step_failed("t1", "too late")
+        workflow.mark_failed(caused_by_step="t1", reason="too late")
 
 
 def test_reporting_a_success_on_the_surviving_branch_after_a_sibling_terminally_failed():
