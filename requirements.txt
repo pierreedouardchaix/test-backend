@@ -9,3 +9,4 @@ httpx2==2.5.0
 python-multipart==0.0.32
 celery==5.4.0
 redis==5.2.1
+sse-starlette==2.1.3
