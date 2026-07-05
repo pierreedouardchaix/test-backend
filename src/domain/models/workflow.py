@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Self
 
+from src.domain.errors import TaskNotFound
 from src.domain.models.task import Task
 from src.domain.models.workflow_definition import WorkflowDefinition
 
@@ -134,5 +135,5 @@ class Workflow:
     def _require_task(self, step_name: str) -> Task:
         task = self.tasks.get(step_name)
         if task is None:
-            raise ValueError(f"No task has been dispatched yet for step {step_name!r}")
+            raise TaskNotFound(f"No task has been dispatched yet for step {step_name!r}")
         return task

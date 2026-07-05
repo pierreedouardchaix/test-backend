@@ -1,6 +1,7 @@
 import uuid
 from dataclasses import dataclass
 
+from src.domain.errors import DomainError
 from src.ports.document_data_source import DocumentDataSource, DocumentDetailRow
 
 
@@ -10,7 +11,7 @@ class GetDocumentQuery:
     tenant_id: uuid.UUID
 
 
-class DocumentNotFound(Exception):
+class DocumentNotFound(DomainError):
     pass
 
 

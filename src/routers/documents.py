@@ -4,7 +4,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from sse_starlette.sse import EventSourceResponse
 
-from src.application.get_document import DocumentNotFound, GetDocumentQuery, GetDocumentUseCase
+from src.application.get_document import GetDocumentQuery, GetDocumentUseCase
 from src.application.ingest_document import IngestDocumentCommand, IngestDocumentUseCase
 from src.application.list_documents import ListDocumentsQuery, ListDocumentsUseCase
 from src.application.unit_of_work import UnitOfWork
@@ -57,12 +57,10 @@ def get_document(
     auth: AuthContext = Depends(get_current_user),
     data_source: DocumentDataSource = Depends(get_document_data_source),
 ):
-    try:
-        row = GetDocumentUseCase(data_source).execute(
-            GetDocumentQuery(document_id=document_id, tenant_id=auth.tenant_id)
-        )
-    except DocumentNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    # DocumentNotFound propagates to the app-level handler (404).
+    row = GetDocumentUseCase(data_source).execute(
+        GetDocumentQuery(document_id=document_id, tenant_id=auth.tenant_id)
+    )
     return DocumentDetailResponse.from_row(row)
 
 
@@ -72,12 +70,9 @@ def get_document_results(
     auth: AuthContext = Depends(get_current_user),
     data_source: DocumentDataSource = Depends(get_document_data_source),
 ):
-    try:
-        row = GetDocumentUseCase(data_source).execute(
-            GetDocumentQuery(document_id=document_id, tenant_id=auth.tenant_id)
-        )
-    except DocumentNotFound:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    row = GetDocumentUseCase(data_source).execute(
+        GetDocumentQuery(document_id=document_id, tenant_id=auth.tenant_id)
+    )
     if row.workflow_status != "succeeded":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Results not yet available")
     return DocumentResultsResponse.from_row(row)

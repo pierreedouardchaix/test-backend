@@ -5,6 +5,7 @@ from typing import Any
 from src.application.unit_of_work import UnitOfWork
 from src.application.workflow_orchestrator import WorkflowOrchestrator
 from src.application.write_use_case import WriteUseCase
+from src.domain.errors import DomainError
 from src.domain.models.task import TaskStatus
 from src.domain.models.workflow import WorkflowStatus
 from src.ports.blob_store import BlobStore
@@ -13,11 +14,11 @@ from src.ports.event_publisher import EventPublisher
 _TERMINAL_TASK_STATUSES = (TaskStatus.SUCCEEDED, TaskStatus.FAILED)
 
 
-class WorkflowNotFound(Exception):
+class WorkflowNotFound(DomainError):
     """No task matches the callback's partner_job_id → the endpoint answers 404."""
 
 
-class CallbackPremature(Exception):
+class CallbackPremature(DomainError):
     """The callback's target task exists but isn't RUNNING yet (e.g. our own
     attempt is still RETRYING after a transient failure on our side, while the
     partner has already processed the job). Transient — the caller should retry

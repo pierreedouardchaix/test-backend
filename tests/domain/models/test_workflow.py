@@ -2,6 +2,7 @@ import uuid
 
 import pytest
 
+from src.domain.errors import TaskNotFound
 from src.domain.models.task import TaskStatus
 from src.domain.models.workflow import Workflow, WorkflowStatus
 from src.domain.models.workflow_definition import StepDefinition, WorkflowDefinition
@@ -236,11 +237,11 @@ def test_mark_task_deferred_on_a_non_running_task_raises():
 
 def test_on_task_succeeded_without_prior_dispatch_raises_a_clear_error():
     workflow = make_workflow()
-    with pytest.raises(ValueError, match="t1"):
+    with pytest.raises(TaskNotFound, match="t1"):
         workflow.on_task_succeeded("t1", "r1")
 
 
 def test_on_task_failed_without_prior_dispatch_raises_a_clear_error():
     workflow = make_workflow()
-    with pytest.raises(ValueError, match="t1"):
+    with pytest.raises(TaskNotFound, match="t1"):
         workflow.on_task_failed("t1", "boom")
