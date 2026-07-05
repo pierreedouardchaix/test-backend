@@ -92,6 +92,7 @@ def task_to_orm(task: Task, tenant_id: uuid.UUID) -> TaskORM:
         status=task.status.value,
         attempts=task.attempts,
         max_attempts=task.max_attempts,
+        partner_job_id=task.partner_job_id,
         errors=[
             {"attempt": e.attempt, "error": e.error, "occurred_at": e.occurred_at.isoformat()}
             for e in task.errors
@@ -110,6 +111,7 @@ def task_from_orm(row: TaskORM) -> Task:
         max_attempts=row.max_attempts,
         status=TaskStatus(row.status),
         attempts=row.attempts,
+        partner_job_id=row.partner_job_id,
         errors=[
             TaskAttemptError(
                 attempt=e["attempt"],

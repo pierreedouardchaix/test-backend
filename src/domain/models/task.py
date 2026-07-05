@@ -36,6 +36,9 @@ class Task:
     status: TaskStatus = TaskStatus.PENDING
     attempts: int = 0
     errors: list[TaskAttemptError] = field(default_factory=list)
+    # The external system's correlation id for a deferred step (partner job id).
+    # Set once the step has handed off and is awaiting its callback.
+    partner_job_id: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -85,6 +88,14 @@ class Task:
         self.status = TaskStatus.FAILED
         self.finished_at = datetime.now(timezone.utc)
         return False
+
+    def mark_deferred(self, partner_job_id: str) -> None:
+        """Record that this running step has handed off to an external system
+        and is awaiting its callback. The task stays RUNNING — only the
+        correlation id is attached; nothing else changes."""
+        if self.status != TaskStatus.RUNNING:
+            raise ValueError(f"Cannot defer a task that is {self.status}")
+        self.partner_job_id = partner_job_id
 
     def fail_terminally(self, error: str) -> None:
         """Fail with no retry, regardless of remaining attempts — for an

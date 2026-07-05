@@ -20,6 +20,12 @@ class FakeWorkflowRepository:
     def get_by_id(self, workflow_id: uuid.UUID) -> Workflow | None:
         return self.saved.get(workflow_id)
 
+    def get_by_partner_job_id(self, partner_job_id: str) -> Workflow | None:
+        for workflow in self.saved.values():
+            if any(task.partner_job_id == partner_job_id for task in workflow.tasks.values()):
+                return workflow
+        return None
+
     def save(self, workflow: Workflow) -> None:
         self.saved[workflow.id] = workflow
 

@@ -210,6 +210,28 @@ def test_start_task_on_a_terminal_workflow_raises():
         workflow.start_task("t2")
 
 
+# --- mark_task_deferred -----------------------------------------------------
+
+def test_mark_task_deferred_records_partner_job_id_and_keeps_task_running():
+    workflow = make_workflow()
+    run_step(workflow, "t1", "r1")
+    workflow.start_task("t2")
+
+    workflow.mark_task_deferred("t2", "j_partner_abc")
+
+    assert workflow.tasks["t2"].partner_job_id == "j_partner_abc"
+    assert workflow.tasks["t2"].status == TaskStatus.RUNNING  # unchanged
+    assert workflow.status == WorkflowStatus.RUNNING
+
+
+def test_mark_task_deferred_on_a_non_running_task_raises():
+    workflow = make_workflow()
+    run_step(workflow, "t1", "r1")  # t1 is SUCCEEDED, not RUNNING
+
+    with pytest.raises(ValueError):
+        workflow.mark_task_deferred("t1", "j_partner_abc")
+
+
 # --- reporting an outcome without a prior dispatch ---------------------------
 
 def test_on_task_succeeded_without_prior_dispatch_raises_a_clear_error():

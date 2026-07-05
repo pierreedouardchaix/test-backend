@@ -5,7 +5,7 @@ from src.application.synchronous_pipeline_driver import SynchronousPipelineDrive
 from src.domain.models.task import TaskStatus
 from src.domain.models.workflow import Workflow, WorkflowStatus
 from src.domain.models.workflow_definition import StepDefinition, WorkflowDefinition
-from src.ports.task_instance_runner import DEFERRED
+from src.ports.task_instance_runner import Deferred
 from tests.fakes import (
     FakeBlobStore,
     FakeEventPublisher,
@@ -145,7 +145,7 @@ def test_deferred_step_leaves_workflow_running_with_its_inputs_resolved():
     workflow = Workflow.create(id=uuid.uuid4(), tenant_id=tenant_id, definition=_callback_definition())
     task_instance_runner = FakeTaskInstanceRunner({
         "t1": [{"text": "extracted"}],
-        "t2": [DEFERRED],  # runner signals: handed off, wait for callback
+        "t2": [Deferred("j_partner123")],  # handed off, carrying the partner's job id
     })
     driver, repository, _, _ = make_driver(task_instance_runner)
     repository.save(workflow)
@@ -160,3 +160,5 @@ def test_deferred_step_leaves_workflow_running_with_its_inputs_resolved():
     assert workflow.status == WorkflowStatus.RUNNING
     assert workflow.tasks["t2"].status == TaskStatus.RUNNING
     assert "t2" not in workflow.results
+    # The partner's correlation id was persisted on the task for the webhook to match.
+    assert workflow.tasks["t2"].partner_job_id == "j_partner123"

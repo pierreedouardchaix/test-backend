@@ -2,7 +2,7 @@ import uuid
 from typing import Any
 
 from src import agents
-from src.ports.task_instance_runner import DEFERRED, Deferred
+from src.ports.task_instance_runner import Deferred
 
 
 class InMemoryTaskInstanceRunner:
@@ -12,8 +12,9 @@ class InMemoryTaskInstanceRunner:
     positional arguments each function expects; the domain never does.
 
     external_call calls agents.external_call() (the simulated outgoing HTTP
-    call) and returns DEFERRED: the task stays RUNNING until the signed partner
-    webhook reports its outcome via WorkflowOrchestrator."""
+    call) and returns a Deferred carrying the partner's job id: the task stays
+    RUNNING until the signed partner webhook (correlated by that job id) reports
+    its outcome via WorkflowOrchestrator."""
 
     def __init__(self) -> None:
         self._handlers = {
@@ -47,11 +48,12 @@ class InMemoryTaskInstanceRunner:
 
     def _external_call(self, *, document_id, tenant_id, inputs) -> Deferred:
         # Simulated outgoing call — may raise ConnectionError (retried like any step failure).
-        # Returns an opaque job_id we don't store yet; correlation is via document_id.
-        agents.external_call(
+        # Returns the partner's opaque job id, which we carry on the Deferred so
+        # the incoming webhook (keyed by that id) is correlated back to this task.
+        partner_job_id = agents.external_call(
             doc_id=str(document_id),
             ocr_text=inputs["ocr"],
             meta=inputs["metadata"],
             chunks=inputs["chunking"],
         )
-        return DEFERRED
+        return Deferred(partner_job_id)

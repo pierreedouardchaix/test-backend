@@ -39,6 +39,14 @@ class SqlAlchemyWorkflowRepository:
             return None
         return self._reconstitute(row)
 
+    def get_by_partner_job_id(self, partner_job_id: str) -> Workflow | None:
+        workflow_id = self._session.execute(
+            select(TaskORM.workflow_id).where(TaskORM.partner_job_id == partner_job_id)
+        ).scalar_one_or_none()
+        if workflow_id is None:
+            return None
+        return self.get_by_id(workflow_id)
+
     def _reconstitute(self, row: WorkflowORM) -> Workflow:
         task_rows = list(
             self._session.execute(select(TaskORM).where(TaskORM.workflow_id == row.id)).scalars()

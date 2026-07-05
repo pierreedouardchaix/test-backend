@@ -61,7 +61,16 @@ class PipelineStepExecutor:
 
         if isinstance(result, Deferred):
             # Handed off to an external executor — step stays RUNNING until the
-            # partner webhook reports its outcome via WorkflowOrchestrator.
+            # partner webhook reports its outcome. A third write records the
+            # partner's correlation id so that webhook can be matched back here.
+            run_with_retry(
+                lambda: self._defer(
+                    tenant_id=tenant_id,
+                    workflow_id=workflow_id,
+                    step_name=step_name,
+                    partner_job_id=result.partner_job_id,
+                )
+            )
             return frozenset()
         return run_with_retry(
             lambda: self._succeed(tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name, result=result)
@@ -75,6 +84,14 @@ class PipelineStepExecutor:
             uow.commit()
             step = workflow.definition.get_step(step_name)
             return step.depends_on, dict(workflow.results)
+
+    def _defer(self, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID, step_name: str, partner_job_id: str) -> None:
+        with self._uow_factory() as uow:
+            orchestrator = WorkflowOrchestrator(uow.workflows, self._blob_store, self._events)
+            orchestrator.handle_step_deferred(
+                tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name, partner_job_id=partner_job_id
+            )
+            uow.commit()
 
     def _fail(self, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID, step_name: str, error: str) -> TaskStatus:
         with self._uow_factory() as uow:

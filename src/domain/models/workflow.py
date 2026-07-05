@@ -114,6 +114,14 @@ class Workflow:
         if not can_retry:
             self.mark_step_failed(step_name, error)
 
+    def mark_task_deferred(self, step_name: str, partner_job_id: str) -> None:
+        """Attach the external correlation id to a step that has just handed off
+        and is awaiting its callback. The task stays RUNNING; the workflow is
+        unchanged — this only records how to correlate the incoming webhook."""
+        if self.status != WorkflowStatus.RUNNING:
+            raise ValueError(f"Cannot defer a task on a workflow that is {self.status}")
+        self._require_task(step_name).mark_deferred(partner_job_id)
+
     def on_callback_failed(self, step_name: str, error: str) -> None:
         """Apply a terminal failure reported by an external callback (the
         partner webhook). Unlike on_task_failed this never retries — the

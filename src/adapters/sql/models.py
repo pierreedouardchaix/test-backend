@@ -77,6 +77,9 @@ class TaskORM(Base):
     status: Mapped[str] = mapped_column(String, nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    # External correlation id (partner job id) for a deferred step. Unique so a
+    # webhook resolves to exactly one task; nullable (only deferred steps have one).
+    partner_job_id: Mapped[str | None] = mapped_column(String, nullable=True, unique=True, index=True)
     # Liste de {attempt, error, occurred_at} — l'historique des essais (TaskAttemptError).
     errors: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

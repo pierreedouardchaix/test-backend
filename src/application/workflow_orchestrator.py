@@ -91,6 +91,22 @@ class WorkflowOrchestrator:
         self._publish(tenant_id=tenant_id, workflow=workflow, step_name=step_name)
         return workflow.tasks[step_name].status
 
+    def handle_step_deferred(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        workflow_id: uuid.UUID,
+        step_name: str,
+        partner_job_id: str,
+    ) -> None:
+        """Record that a step handed off to an external system and is awaiting
+        its callback, keyed by `partner_job_id`. No event is published: the task
+        stays RUNNING, nothing observable changes for the client — only the
+        correlation id is persisted so the incoming webhook can be matched."""
+        workflow = self._require_workflow(workflow_id, tenant_id=tenant_id)
+        workflow.mark_task_deferred(step_name, partner_job_id)
+        self._workflow_repository.save(workflow)
+
     def handle_terminal_failure(
         self,
         *,
