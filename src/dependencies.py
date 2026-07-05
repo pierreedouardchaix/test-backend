@@ -8,13 +8,16 @@
 from collections.abc import Generator
 from functools import lru_cache
 
+from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from src.adapters.in_memory.blob_store import InMemoryBlobStore
 from src.adapters.in_memory.workflow_dispatcher import NoOpWorkflowDispatcher
+from src.adapters.sql.document_data_source import SqlAlchemyDocumentDataSource
 from src.adapters.sql.engine import create_db_engine, create_session_factory
 from src.adapters.sql.unit_of_work import SqlAlchemyUnitOfWork
 from src.ports.blob_store import BlobStore
+from src.ports.document_data_source import DocumentDataSource
 from src.ports.workflow_dispatcher import WorkflowDispatcher
 from src.settings import Settings
 
@@ -53,3 +56,7 @@ def get_blob_store() -> BlobStore:
 @lru_cache(maxsize=1)
 def get_workflow_dispatcher() -> WorkflowDispatcher:
     return NoOpWorkflowDispatcher()
+
+
+def get_document_data_source(session: Session = Depends(get_session)) -> DocumentDataSource:
+    return SqlAlchemyDocumentDataSource(session)
