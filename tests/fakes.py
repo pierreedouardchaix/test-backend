@@ -1,6 +1,8 @@
 import json
 import uuid
 
+from src.domain.models.document import Document
+from src.domain.models.tenant import Tenant
 from src.domain.models.workflow import Workflow
 
 
@@ -42,6 +44,68 @@ class FakeEventPublisher:
 
     def publish(self, *, tenant_id, document_id, event) -> None:
         self.published.append({"tenant_id": tenant_id, "document_id": document_id, "event": event})
+
+
+class FakeTenantRepository:
+    def __init__(self):
+        self.saved: dict[uuid.UUID, Tenant] = {}
+
+    def get(self, tenant_id: uuid.UUID) -> Tenant | None:
+        return self.saved.get(tenant_id)
+
+    def save(self, tenant: Tenant) -> None:
+        self.saved[tenant.id] = tenant
+
+
+class FakeDocumentRepository:
+    def __init__(self):
+        self.saved: dict[uuid.UUID, Document] = {}
+
+    def get(self, document_id: uuid.UUID, *, tenant_id: uuid.UUID) -> Document | None:
+        doc = self.saved.get(document_id)
+        if doc is None or doc.tenant_id != tenant_id:
+            return None
+        return doc
+
+    def save(self, document: Document) -> None:
+        self.saved[document.id] = document
+
+    def list_by_tenant(self, tenant_id: uuid.UUID) -> list[Document]:
+        return [d for d in self.saved.values() if d.tenant_id == tenant_id]
+
+
+class FakeWorkflowDispatcher:
+    def __init__(self):
+        self.dispatched: list[dict] = []
+
+    def dispatch(self, workflow_id: uuid.UUID, *, tenant_id: uuid.UUID) -> None:
+        self.dispatched.append({"workflow_id": workflow_id, "tenant_id": tenant_id})
+
+
+class FakeUnitOfWork:
+    """No-op transaction boundary wrapping fake repositories.
+
+    Tracks whether commit() was called so tests can assert on it.
+    Context manager is a no-op — repos are ready from construction.
+    """
+
+    def __init__(self):
+        self.tenants = FakeTenantRepository()
+        self.documents = FakeDocumentRepository()
+        self.workflows = FakeWorkflowRepository()
+        self.committed = False
+
+    def __enter__(self) -> "FakeUnitOfWork":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        pass
+
+    def commit(self) -> None:
+        self.committed = True
+
+    def rollback(self) -> None:
+        pass
 
 
 class FakeTaskInstanceRunner:
