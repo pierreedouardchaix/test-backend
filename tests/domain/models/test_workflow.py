@@ -65,6 +65,22 @@ def test_fan_in_ready_regardless_of_completion_order(order):
     assert ready == frozenset({"t4"})
 
 
+def test_fan_in_sibling_already_dispatched_is_not_rediscovered_as_ready():
+    """Regression: in real multi-worker execution, t2 and t3 are both
+    dispatched (start_task) before either completes — they run concurrently
+    on different workers. When t2 finishes first, ready_steps() must not
+    re-list t3 (it's already RUNNING, just not finished yet) — otherwise the
+    caller would enqueue a second, duplicate execution of t3."""
+    workflow = make_workflow()
+    run_step(workflow, "t1", "r1")
+
+    workflow.start_task("t2")
+    workflow.start_task("t3")  # both dispatched before either finishes
+
+    ready = workflow.on_task_succeeded("t2", "r2")
+    assert "t3" not in ready
+
+
 def test_fan_in_blocked_by_terminal_failure_of_one_branch():
     workflow = make_workflow(t2=1)
     run_step(workflow, "t1", "r1")

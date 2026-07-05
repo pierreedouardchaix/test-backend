@@ -43,9 +43,17 @@ class Workflow:
         return frozenset(self.results)
 
     def ready_steps(self) -> frozenset[str]:
+        """Steps whose dependencies are met and that have never been
+        dispatched. A step that already has a Task (RUNNING/RETRYING/
+        already terminal) is excluded even though it isn't in
+        completed_steps() yet — otherwise, in a fan-in, one sibling
+        finishing would re-list an already-dispatched-but-not-yet-finished
+        sibling as "ready" and cause a duplicate dispatch. A step's own
+        retries are re-scheduled explicitly by the caller (see
+        PipelineStepExecutor), never rediscovered through this method."""
         if self.status != WorkflowStatus.RUNNING:
             return frozenset()
-        return self.definition.ready_steps(self.completed_steps())
+        return self.definition.ready_steps(self.completed_steps()) - frozenset(self.tasks)
 
     def record_step_result(self, step_name: str, result: Any) -> None:
         if self.status != WorkflowStatus.RUNNING:
