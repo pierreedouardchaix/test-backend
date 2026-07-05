@@ -1,12 +1,11 @@
 import os
 
-from fastapi import Depends, FastAPI, Request, status
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.application.apply_partner_callback import WorkflowNotFound
 from src.application.get_document import DocumentNotFound
-from src.auth import AuthContext, get_current_user
 from src.domain.errors import TaskNotFound
 from src.logging_config import configure_logging
 from src.routers import auth, dev, documents, webhooks
@@ -44,13 +43,3 @@ async def _not_found_handler(request: Request, exc: Exception) -> JSONResponse:
 @app.get("/healthcheck")
 def healthcheck():
     return {"status": "ok"}
-
-
-@app.get("/me")
-def me(auth_ctx: AuthContext = Depends(get_current_user)):
-    return {
-        "user_id": str(auth_ctx.user.id),
-        "first_name": auth_ctx.user.first_name,
-        "last_name": auth_ctx.user.last_name,
-        "tenant_id": str(auth_ctx.tenant_id),
-    }

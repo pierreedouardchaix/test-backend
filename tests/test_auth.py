@@ -1,18 +1,30 @@
-"""Auth + tenant isolation tests using FastAPI TestClient with overridden deps."""
+"""Auth + tenant isolation tests using FastAPI TestClient with overridden deps.
+
+`get_current_user` is exercised through a minimal `/protected` route defined
+here (not a production endpoint), so these tests don't depend on any particular
+app route existing."""
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from src.adapters.jwt_auth import issue_token
-from src.auth import AuthContext
+from src.auth import AuthContext, get_current_user
 from src.dependencies import get_session, get_settings
 from src.domain.models.tenant import Tenant
 from src.domain.models.user import User
 from src.main import app
 from src.settings import Settings
+
+_protected_app = FastAPI()
+
+
+@_protected_app.get("/protected")
+def _protected(auth: AuthContext = Depends(get_current_user)):
+    return {"user_id": str(auth.user.id), "tenant_id": str(auth.tenant_id), "first_name": auth.user.first_name}
 
 TENANT_ID = uuid.UUID("00000000-aaaa-0000-0000-000000000001")
 USER_ID = uuid.UUID("00000000-aaaa-0000-0000-000000000011")
@@ -58,6 +70,7 @@ def _valid_token() -> str:
 
 @pytest.fixture()
 def client():
+    """TestClient on the real app (for the /auth/dev-token tests)."""
     session = _mock_session()
     app.dependency_overrides[get_settings] = lambda: _settings
     app.dependency_overrides[get_session] = lambda: session
@@ -66,13 +79,24 @@ def client():
     app.dependency_overrides.clear()
 
 
-def test_me_without_token_returns_401(client):
-    r = client.get("/me")
-    assert r.status_code == 401
+@pytest.fixture()
+def auth_client():
+    """TestClient on the minimal /protected app (for the get_current_user tests)."""
+    session = _mock_session()
+    _protected_app.dependency_overrides[get_settings] = lambda: _settings
+    _protected_app.dependency_overrides[get_session] = lambda: session
+    with TestClient(_protected_app) as c:
+        yield c
+    _protected_app.dependency_overrides.clear()
 
 
-def test_me_with_valid_token_returns_200(client):
-    r = client.get("/me", headers={"Authorization": f"Bearer {_valid_token()}"})
+def test_protected_without_token_returns_401(auth_client):
+    r = auth_client.get("/protected")
+    assert r.status_code == 401  # no Authorization header → rejected
+
+
+def test_protected_with_valid_token_returns_200(auth_client):
+    r = auth_client.get("/protected", headers={"Authorization": f"Bearer {_valid_token()}"})
     assert r.status_code == 200
     body = r.json()
     assert body["user_id"] == str(USER_ID)
@@ -80,23 +104,23 @@ def test_me_with_valid_token_returns_200(client):
     assert body["first_name"] == "Alice"
 
 
-def test_me_with_wrong_secret_returns_401(client):
+def test_protected_with_wrong_secret_returns_401(auth_client):
     bad_token = issue_token(
         tenant_id=TENANT_ID, user_id=USER_ID, secret="wrong-secret", expiry_seconds=3600
     )
-    r = client.get("/me", headers={"Authorization": f"Bearer {bad_token}"})
+    r = auth_client.get("/protected", headers={"Authorization": f"Bearer {bad_token}"})
     assert r.status_code == 401
 
 
-def test_me_with_expired_token_returns_401(client):
+def test_protected_with_expired_token_returns_401(auth_client):
     expired = issue_token(
         tenant_id=TENANT_ID, user_id=USER_ID, secret=SECRET, expiry_seconds=-1
     )
-    r = client.get("/me", headers={"Authorization": f"Bearer {expired}"})
+    r = auth_client.get("/protected", headers={"Authorization": f"Bearer {expired}"})
     assert r.status_code == 401
 
 
-def test_tenant_isolation_user_from_other_tenant_gets_401(client):
+def test_tenant_isolation_user_from_other_tenant_gets_401(auth_client):
     """Token for a real user but wrong tenant_id → tenant not found → 401."""
     other_tenant_id = uuid.uuid4()
     cross_token = issue_token(
@@ -105,8 +129,8 @@ def test_tenant_isolation_user_from_other_tenant_gets_401(client):
     # Make the session return None for any other tenant_id lookup
     session = _mock_session()
     session.get.return_value = None
-    app.dependency_overrides[get_session] = lambda: session
-    r = client.get("/me", headers={"Authorization": f"Bearer {cross_token}"})
+    _protected_app.dependency_overrides[get_session] = lambda: session
+    r = auth_client.get("/protected", headers={"Authorization": f"Bearer {cross_token}"})
     assert r.status_code == 401
 
 
