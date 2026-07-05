@@ -22,11 +22,15 @@ from src.ports.blob_store import BlobStore
 from src.ports.document_data_source import DocumentDataSource
 from src.ports.event_stream import EventStream
 from src.ports.workflow_dispatcher import WorkflowDispatcher
-from src.routers.schemas import DocumentDetailResponse, DocumentResultsResponse, DocumentSummaryResponse
+from src.routers.schemas import (
+    DOCUMENT_TERMINAL_STATUSES,
+    DocumentDetailResponse,
+    DocumentResultsResponse,
+    DocumentSummaryResponse,
+    document_status,
+)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
-
-_TERMINAL_STATUSES = ("succeeded", "failed")
 
 
 @router.post("", status_code=201)
@@ -48,7 +52,7 @@ async def upload_document(
             file_content=content,
         )
     )
-    return {"document_id": str(result.document_id), "workflow_status": result.workflow_status}
+    return {"document_id": str(result.document_id), "status": document_status(result.workflow_status)}
 
 
 @router.get("/{document_id}", response_model=DocumentDetailResponse)
@@ -69,20 +73,23 @@ def get_document_results(
     document_id: uuid.UUID,
     auth: AuthContext = Depends(get_current_user),
     data_source: DocumentDataSource = Depends(get_document_data_source),
+    blob_store: BlobStore = Depends(get_blob_store),
 ):
     row = GetDocumentUseCase(data_source).execute(
         GetDocumentQuery(document_id=document_id, tenant_id=auth.tenant_id)
     )
     if row.workflow_status == "failed":
-        # Terminal: results will never come. Distinct from "still running" so a
+        # Terminal: results will never come. Distinct from "not ready yet" so a
         # polling client stops instead of retrying forever.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Processing failed at step '{row.failed_step}': {row.failure_reason}",
         )
     if row.workflow_status != "succeeded":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Results not yet available (still processing)")
-    return DocumentResultsResponse.from_row(row)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document is not ready yet (still processing)")
+    # step_results holds blob keys (internal); resolve each to the actual value.
+    results = {step: json.loads(blob_store.get(blob_key)) for step, blob_key in row.step_results.items()}
+    return DocumentResultsResponse(results=results)
 
 
 @router.get("/{document_id}/events")
@@ -117,20 +124,27 @@ async def stream_document_events(
             if snapshot is None:
                 return  # vanished between the two reads (documents aren't deleted) — nothing to stream
             snapshot_version = snapshot.workflow_version
+            snapshot_status = document_status(snapshot.workflow_status)  # document-facing: processing/ready/failed
             yield {"event": "snapshot", "data": json.dumps({
-                "workflow_status": snapshot.workflow_status,
+                "status": snapshot_status,
                 "version": snapshot_version,
                 "failed_step": snapshot.failed_step,
                 "failure_reason": snapshot.failure_reason,
             })}
-            if snapshot.workflow_status in _TERMINAL_STATUSES:
+            if snapshot_status in DOCUMENT_TERMINAL_STATUSES:
                 return
 
             async for event in events:
                 if event.get("version", 0) <= snapshot_version:
                     continue  # already reflected in the snapshot (older or duplicate)
-                yield {"event": "step", "data": json.dumps(event)}
-                if event.get("workflow_status") in _TERMINAL_STATUSES:
+                # Map the internal workflow status to the document-facing one; the
+                # per-step `step_status` is task-level and stays as is. Build a new
+                # dict (don't mutate the incoming event).
+                doc_status = document_status(event.get("workflow_status", ""))
+                out = {k: v for k, v in event.items() if k != "workflow_status"}
+                out["status"] = doc_status
+                yield {"event": "step", "data": json.dumps(out)}
+                if doc_status in DOCUMENT_TERMINAL_STATUSES:
                     return
 
     return EventSourceResponse(event_generator())

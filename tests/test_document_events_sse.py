@@ -19,6 +19,14 @@ from src.domain.models.user import User
 from src.main import app
 from src.ports.document_data_source import DocumentDetailRow
 
+
+def _expected_step(event: dict) -> dict:
+    """The client-facing shape of a forwarded step event: workflow_status is
+    mapped to the document-facing `status`; the rest passes through."""
+    out = {k: v for k, v in event.items() if k != "workflow_status"}
+    out["status"] = {"running": "processing", "succeeded": "ready", "failed": "failed"}[event["workflow_status"]]
+    return out
+
 TENANT = uuid.uuid4()
 USER = User(id=uuid.uuid4(), first_name="Alice", last_name="Acme")
 DOC_ID = uuid.uuid4()
@@ -116,9 +124,9 @@ def test_snapshot_is_the_first_event_then_live_deltas():
     assert r.status_code == 200
     parsed = _sse_events(r.text)
     assert parsed[0] == ("snapshot", {
-        "workflow_status": "running", "version": SNAPSHOT_VERSION, "failed_step": None, "failure_reason": None,
+        "status": "processing", "version": SNAPSHOT_VERSION, "failed_step": None, "failure_reason": None,
     })
-    assert parsed[1:] == [("step", events[0]), ("step", events[1])]
+    assert parsed[1:] == [("step", _expected_step(events[0])), ("step", _expected_step(events[1]))]
 
 
 def test_events_at_or_below_snapshot_version_are_dropped():
@@ -134,7 +142,7 @@ def test_events_at_or_below_snapshot_version_are_dropped():
         app.dependency_overrides.clear()
 
     step_events = [data for kind, data in _sse_events(r.text) if kind == "step"]
-    assert step_events == [events[2]]  # only the version-4 event survives the filter
+    assert step_events == [_expected_step(events[2])]  # only the version-4 event survives the filter
 
 
 def test_already_terminal_workflow_snapshot_is_the_whole_stream():
@@ -153,7 +161,7 @@ def test_already_terminal_workflow_snapshot_is_the_whole_stream():
     assert len(parsed) == 1
     kind, data = parsed[0]
     assert kind == "snapshot"
-    assert data["workflow_status"] == "succeeded"
+    assert data["status"] == "ready"  # succeeded → ready (README vocabulary)
 
 
 def test_closes_at_terminal_status_ignoring_later_events():
@@ -169,5 +177,5 @@ def test_closes_at_terminal_status_ignoring_later_events():
         app.dependency_overrides.clear()
 
     step_events = [data for kind, data in _sse_events(r.text) if kind == "step"]
-    assert step_events == events[:2]  # stopped right after the terminal (succeeded) event
+    assert step_events == [_expected_step(events[0]), _expected_step(events[1])]  # stopped after terminal (ready)
     assert all(e["step"] != "should_not_appear" for e in step_events)
