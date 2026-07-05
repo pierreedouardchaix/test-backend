@@ -11,6 +11,7 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from src.application.apply_partner_callback import PartnerCallbackCommand
@@ -51,12 +52,15 @@ class PartnerWebhookPayload(BaseModel):
     error: str | None = Field(default=None, max_length=2000)
 
 
+_TERMINAL_TASK_STATUSES = ("succeeded", "failed")
+
+
 @router.post("/partner", status_code=status.HTTP_202_ACCEPTED)
 async def partner_webhook(
     request: Request,
     x_partner_signature: str = Header(default=""),
     settings: Settings = Depends(get_settings),
-    partner_job_exists: PartnerJobResolver = Depends(get_partner_job_resolver),
+    partner_job_status: PartnerJobResolver = Depends(get_partner_job_resolver),
     dispatcher: PartnerCallbackDispatcher = Depends(get_partner_callback_dispatcher),
 ):
     declared_length = _declared_content_length(request.headers.get("content-length"))
@@ -80,11 +84,19 @@ async def partner_webhook(
             detail="status must be 'completed' or 'failed'",
         )
 
-    # 404 synchronously if the job id is unknown, so the partner retries (a very
-    # fast webhook can beat our own persistence of the job id — that race resolves
-    # by retry; see dev_considerations.md). Otherwise hand off and return 202.
-    if not partner_job_exists(payload.job_id):
+    task_status = partner_job_status(payload.job_id)
+    # Unknown job id → 404, so the partner retries (a very fast webhook can beat
+    # our own persistence of the job id — that race resolves by retry; see
+    # dev_considerations.md).
+    if task_status is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown job_id")
+    # The step already reached a terminal outcome → this callback (a partner
+    # retry, or a contradictory second delivery) is a no-op. Acknowledge it
+    # synchronously (200) without enqueuing — the task-level idempotence in the
+    # use case is still the real guarantee against a concurrent duplicate that
+    # slips past this best-effort check.
+    if task_status in _TERMINAL_TASK_STATUSES:
+        return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "already_processed"})
 
     dispatcher.dispatch(
         PartnerCallbackCommand(

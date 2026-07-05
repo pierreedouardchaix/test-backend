@@ -23,7 +23,7 @@ from src.bootstrap import (
     get_session_factory,
     get_settings,
     new_unit_of_work,
-    partner_job_exists,
+    partner_job_task_status,
     read_document_detail,
 )
 from src.ports.document_data_source import DocumentDataSource, DocumentDetailRow
@@ -33,7 +33,7 @@ from src.ports.workflow_dispatcher import WorkflowDispatcher
 __all__ = ["get_blob_store", "get_event_publisher", "get_event_stream", "get_settings"]
 
 DocumentReader = Callable[[uuid.UUID, uuid.UUID], DocumentDetailRow | None]
-PartnerJobResolver = Callable[[str], bool]
+PartnerJobResolver = Callable[[str], str | None]  # partner_job_id → task status (None if unknown)
 
 
 def get_document_reader() -> DocumentReader:
@@ -68,9 +68,9 @@ def get_partner_callback_dispatcher() -> PartnerCallbackDispatcher:
 
 
 def get_partner_job_resolver() -> PartnerJobResolver:
-    """Short-session existence check for the webhook's 404 gate — see
-    bootstrap.partner_job_exists."""
-    return partner_job_exists
+    """Resolves a partner job id to its task status for the webhook gate — see
+    bootstrap.partner_job_task_status."""
+    return partner_job_task_status
 
 
 def get_document_data_source(session: Session = Depends(get_session)) -> DocumentDataSource:

@@ -24,9 +24,9 @@ _settings = Settings(
 )
 
 
-def _client(dispatcher: FakePartnerCallbackDispatcher, *, job_exists: bool = True) -> TestClient:
+def _client(dispatcher: FakePartnerCallbackDispatcher, *, task_status: str | None = "running") -> TestClient:
     app.dependency_overrides[get_settings] = lambda: _settings
-    app.dependency_overrides[get_partner_job_resolver] = lambda: (lambda partner_job_id: job_exists)
+    app.dependency_overrides[get_partner_job_resolver] = lambda: (lambda partner_job_id: task_status)
     app.dependency_overrides[get_partner_callback_dispatcher] = lambda: dispatcher
     return TestClient(app)
 
@@ -82,12 +82,28 @@ def test_invalid_signature_is_401_and_not_enqueued():
 def test_unknown_job_id_is_404_and_not_enqueued():
     dispatcher = FakePartnerCallbackDispatcher()
     try:
-        r = _post_signed(_client(dispatcher, job_exists=False), {"job_id": "j_unknown", "status": "completed"})
+        r = _post_signed(_client(dispatcher, task_status=None), {"job_id": "j_unknown", "status": "completed"})
     finally:
         app.dependency_overrides.clear()
 
     assert r.status_code == 404
     assert dispatcher.dispatched == []
+
+
+def test_callback_on_an_already_terminal_task_is_200_already_processed_not_enqueued():
+    """A duplicate/late webhook on a finalized job is acknowledged synchronously
+    (200) without enqueuing — the caller sees it's a no-op instead of an opaque
+    202. Tested for both a succeeded and a failed task."""
+    for terminal in ("succeeded", "failed"):
+        dispatcher = FakePartnerCallbackDispatcher()
+        try:
+            r = _post_signed(_client(dispatcher, task_status=terminal), {"job_id": PARTNER_JOB_ID, "status": "completed"})
+        finally:
+            app.dependency_overrides.clear()
+
+        assert r.status_code == 200
+        assert r.json() == {"status": "already_processed"}
+        assert dispatcher.dispatched == []
 
 
 def test_bad_status_is_422_and_not_enqueued():

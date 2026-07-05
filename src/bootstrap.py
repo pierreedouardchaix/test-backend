@@ -81,16 +81,21 @@ def read_document_detail(document_id: uuid.UUID, tenant_id: uuid.UUID) -> Docume
         session.close()
 
 
-def partner_job_exists(partner_job_id: str) -> bool:
-    """Whether a task with this partner job id is on record — the webhook's
-    synchronous 404 gate. Short-session read (open → read → close): the webhook
-    only needs existence, not to hold a session while it enqueues.
+def partner_job_task_status(partner_job_id: str) -> str | None:
+    """The status of the task this partner job id belongs to, or None if the id
+    is unknown — the webhook's synchronous gate. `None` → 404; a terminal status
+    (succeeded/failed) → the callback is a no-op the endpoint can acknowledge
+    without enqueuing; otherwise → hand off to the Celery task.
 
-    Cross-tenant by nature (the partner has no tenant context), so RLS is scoped
-    to the bypass sentinel for this lookup."""
+    Short-session read (open → read → close), cross-tenant (the partner has no
+    tenant context) so RLS is scoped to the bypass sentinel."""
     session = get_session_factory()()
     try:
         scope_session_to_tenant(session, CROSS_TENANT)
-        return SqlAlchemyWorkflowRepository(session).get_by_partner_job_id(partner_job_id) is not None
+        workflow = SqlAlchemyWorkflowRepository(session).get_by_partner_job_id(partner_job_id)
+        if workflow is None:
+            return None
+        task = next((t for t in workflow.tasks.values() if t.partner_job_id == partner_job_id), None)
+        return task.status.value if task is not None else None
     finally:
         session.close()
