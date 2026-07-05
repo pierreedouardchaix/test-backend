@@ -11,7 +11,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from src.application.apply_partner_callback import (
     ApplyPartnerCallbackUseCase,
@@ -27,12 +27,17 @@ from src.settings import Settings
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
+# Reject oversized bodies before HMAC computation (HMAC on a multi-MB body is a DoS vector).
+# Also configure this at the web-server level (e.g. nginx `client_max_body_size 64k`,
+# uvicorn `--limit-concurrency`) — the application-level check is a second line of defence, not the first.
+_MAX_BODY_BYTES = 64 * 1024  # 64 KB is orders of magnitude above any legitimate callback payload
+
 
 class PartnerWebhookPayload(BaseModel):
     job_id: UUID
     status: str  # "completed" | "failed"
     result: Any | None = None
-    error: str | None = None
+    error: str | None = Field(default=None, max_length=2000)
 
 
 @router.post("/partner")
@@ -44,7 +49,13 @@ async def partner_webhook(
     blob_store: BlobStore = Depends(get_blob_store),
     event_publisher: EventPublisher = Depends(get_event_publisher),
 ):
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > _MAX_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="Payload too large")
+
     raw_body = await request.body()
+    if len(raw_body) > _MAX_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="Payload too large")
     if not verify(raw_body, x_partner_signature, secret=settings.partner_hmac_secret):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
 
@@ -61,6 +72,7 @@ async def partner_webhook(
 
     command = PartnerCallbackCommand(
         job_id=payload.job_id,
+        step_name="external_call",
         succeeded=payload.status == "completed",
         result=payload.result,
         error=payload.error,

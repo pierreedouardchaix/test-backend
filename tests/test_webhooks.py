@@ -115,3 +115,31 @@ def test_failed_callback_marks_document_failed():
     wf = uow.workflows.get_by_id(job_id)
     assert wf.status == WorkflowStatus.FAILED
     assert wf.failure_reason == "partner boom"
+
+
+def test_oversized_body_is_413():
+    uow = FakeUnitOfWork()
+    try:
+        client = _client(uow)
+        big_body = b"x" * (64 * 1024 + 1)
+        r = client.post(
+            "/webhooks/partner",
+            content=big_body,
+            headers={"X-Partner-Signature": "irrelevant"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert r.status_code == 413
+
+
+def test_error_field_truncated_above_2000_chars_is_422():
+    job_id = uuid.uuid4()
+    uow = FakeUnitOfWork()
+    uow.workflows.save(_workflow_awaiting_callback(job_id))
+    try:
+        r = _post_signed(_client(uow), {"job_id": str(job_id), "status": "failed", "error": "x" * 2001})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert r.status_code == 422
