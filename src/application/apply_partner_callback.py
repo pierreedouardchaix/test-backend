@@ -2,9 +2,9 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.application.unit_of_work import CROSS_TENANT, UnitOfWork
+from src.application.unit_of_work import UnitOfWork
 from src.application.workflow_orchestrator import WorkflowOrchestrator
-from src.application.write_use_case import WriteUseCase
+from src.application.write_use_case import CrossTenantWriteUseCase
 from src.domain.errors import DomainError
 from src.domain.models.task import TaskStatus
 from src.domain.models.workflow import WorkflowStatus
@@ -43,7 +43,7 @@ class PartnerCallbackResult:
     newly_ready: frozenset[str] = field(default_factory=frozenset)  # steps unblocked, for the caller to dispatch
 
 
-class ApplyPartnerCallbackUseCase(WriteUseCase[PartnerCallbackCommand, PartnerCallbackResult]):
+class ApplyPartnerCallbackUseCase(CrossTenantWriteUseCase[PartnerCallbackCommand, PartnerCallbackResult]):
     """Applies a partner webhook to the step named in the command, through the
     same WorkflowOrchestrator every other trigger funnels through.
 
@@ -61,10 +61,9 @@ class ApplyPartnerCallbackUseCase(WriteUseCase[PartnerCallbackCommand, PartnerCa
         self._events = event_publisher
 
     def _execute(self, command: PartnerCallbackCommand) -> PartnerCallbackResult:
-        # Cross-tenant ingress: the partner has no tenant context, correlation is
-        # by its job id alone. RLS bypass for the resolve; the write then targets
-        # the resolved workflow's own tenant (enforced at the application level).
-        self._uow.scope_to_tenant(CROSS_TENANT)
+        # Cross-tenant ingress (correlation by the partner's job id, no tenant
+        # context): CrossTenantWriteUseCase already scoped the UoW to the bypass.
+        # The write then targets the resolved workflow's own tenant.
         workflow = self._uow.workflows.get_by_partner_job_id(command.partner_job_id)
         if workflow is None:
             raise WorkflowNotFound(command.partner_job_id)

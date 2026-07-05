@@ -1,14 +1,17 @@
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 
 import pytest
 
-from src.application.write_use_case import WriteUseCase
+from src.application.unit_of_work import CROSS_TENANT
+from src.application.write_use_case import CrossTenantWriteUseCase, WriteUseCase
 from tests.fakes import FakeUnitOfWork
 
 
 @dataclass(frozen=True)
 class DummyCommand:
-    pass
+    # WriteUseCase is single-tenant: it scopes the UoW to command.tenant_id for RLS.
+    tenant_id: uuid.UUID = field(default_factory=uuid.uuid4)
 
 
 @dataclass(frozen=True)
@@ -39,3 +42,22 @@ def test_db_access_in_post_execution_raises():
     uow = FakeUnitOfWork()
     with pytest.raises(RuntimeError, match="not allowed in _post_execution"):
         _BadUseCase(uow).execute(DummyCommand())
+
+
+def test_single_tenant_write_scopes_the_uow_to_the_command_tenant():
+    """RLS is applied by the base, automatically — a subclass can't forget it."""
+    uow = FakeUnitOfWork()
+    tenant = uuid.uuid4()
+    _OkUseCase(uow).execute(DummyCommand(tenant_id=tenant))
+    assert uow.scoped_tenant == tenant
+
+
+class _CrossTenantUseCase(CrossTenantWriteUseCase[DummyCommand, DummyResult]):
+    def _execute(self, command):
+        return DummyResult()
+
+
+def test_cross_tenant_write_scopes_the_uow_to_the_bypass():
+    uow = FakeUnitOfWork()
+    _CrossTenantUseCase(uow).execute(DummyCommand())
+    assert uow.scoped_tenant == CROSS_TENANT

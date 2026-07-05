@@ -1,5 +1,6 @@
 import json
 import uuid
+from contextlib import contextmanager
 from typing import Any, Callable
 
 from src.application.concurrency import run_with_retry
@@ -86,13 +87,21 @@ class PipelineStepExecutor:
         _log.info("step succeeded", extra={**log_context, "unblocked": sorted(newly_ready)})
         return newly_ready
 
+    @contextmanager
+    def _scoped_work(self, tenant_id: uuid.UUID):
+        """Open a fresh UoW, RLS-scope it to the tenant, and hand back (uow,
+        orchestrator). Centralizing the scope call here means none of the four
+        step-writes below can forget it — the same "automatically defensive"
+        guarantee WriteUseCase gives the request-path use cases."""
+        with self._uow_factory() as uow:
+            uow.scope_to_tenant(tenant_id)
+            yield uow, WorkflowOrchestrator(uow.workflows, self._blob_store, self._events)
+
     def _start(self, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID, step_name: str) -> dict[str, str]:
         """Mark the step started (committed before it runs) and return the blob
         key of each dependency's output — `{dep: blob_key}` — for _resolve_inputs
         to materialize."""
-        with self._uow_factory() as uow:
-            uow.scope_to_tenant(tenant_id)  # RLS: this step's writes/reads scoped to its tenant
-            orchestrator = WorkflowOrchestrator(uow.workflows, self._blob_store, self._events)
+        with self._scoped_work(tenant_id) as (uow, orchestrator):
             orchestrator.start_task(tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name)
             workflow = uow.workflows.get(workflow_id, tenant_id=tenant_id)
             uow.commit()
@@ -100,18 +109,14 @@ class PipelineStepExecutor:
             return {dep: workflow.results[dep] for dep in step.depends_on}
 
     def _defer(self, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID, step_name: str, partner_job_id: str) -> None:
-        with self._uow_factory() as uow:
-            uow.scope_to_tenant(tenant_id)  # RLS: this step's writes/reads scoped to its tenant
-            orchestrator = WorkflowOrchestrator(uow.workflows, self._blob_store, self._events)
+        with self._scoped_work(tenant_id) as (uow, orchestrator):
             orchestrator.handle_step_deferred(
                 tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name, partner_job_id=partner_job_id
             )
             uow.commit()
 
     def _fail(self, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID, step_name: str, error: str) -> TaskStatus:
-        with self._uow_factory() as uow:
-            uow.scope_to_tenant(tenant_id)  # RLS: this step's writes/reads scoped to its tenant
-            orchestrator = WorkflowOrchestrator(uow.workflows, self._blob_store, self._events)
+        with self._scoped_work(tenant_id) as (uow, orchestrator):
             status = orchestrator.handle_step_failure(
                 tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name, error=error
             )
@@ -119,9 +124,7 @@ class PipelineStepExecutor:
             return status
 
     def _succeed(self, *, tenant_id: uuid.UUID, workflow_id: uuid.UUID, step_name: str, result: Any) -> frozenset[str]:
-        with self._uow_factory() as uow:
-            uow.scope_to_tenant(tenant_id)  # RLS: this step's writes/reads scoped to its tenant
-            orchestrator = WorkflowOrchestrator(uow.workflows, self._blob_store, self._events)
+        with self._scoped_work(tenant_id) as (uow, orchestrator):
             ready_steps = orchestrator.handle_step_success(
                 tenant_id=tenant_id, workflow_id=workflow_id, step_name=step_name, result=result
             )
