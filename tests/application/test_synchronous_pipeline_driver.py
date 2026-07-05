@@ -1,7 +1,7 @@
 import uuid
 
+from src.application.pipeline_step_executor import PipelineStepExecutor
 from src.application.synchronous_pipeline_driver import SynchronousPipelineDriver
-from src.application.workflow_orchestrator import WorkflowOrchestrator
 from src.domain.models.task import TaskStatus
 from src.domain.models.workflow import Workflow, WorkflowStatus
 from src.domain.models.workflow_definition import StepDefinition, WorkflowDefinition
@@ -10,7 +10,7 @@ from tests.fakes import (
     FakeBlobStore,
     FakeEventPublisher,
     FakeTaskInstanceRunner,
-    FakeWorkflowRepository,
+    FakeUnitOfWork,
 )
 
 
@@ -33,12 +33,22 @@ def make_definition(**step_overrides: int) -> WorkflowDefinition:
 
 
 def make_driver(task_instance_runner):
-    workflow_repository = FakeWorkflowRepository()
+    """The fakes share a single FakeUnitOfWork instance across every "fresh"
+    uow_factory() call — they don't model separate transactions/versions, so
+    the executor's repeated get()/save() cycles all act on the same in-memory
+    Workflow, exactly like the real multi-transaction flow but without the
+    concurrency-retry machinery actually kicking in (nothing races here)."""
+    uow = FakeUnitOfWork()
     blob_store = FakeBlobStore()
     events = FakeEventPublisher()
-    orchestrator = WorkflowOrchestrator(workflow_repository, blob_store, events)
-    driver = SynchronousPipelineDriver(orchestrator, task_instance_runner, blob_store)
-    return driver, workflow_repository, blob_store, events
+    executor = PipelineStepExecutor(
+        uow_factory=lambda: uow,
+        task_instance_runner=task_instance_runner,
+        blob_store=blob_store,
+        event_publisher=events,
+    )
+    driver = SynchronousPipelineDriver(executor, uow.workflows)
+    return driver, uow.workflows, blob_store, events
 
 
 def test_drives_a_full_fan_out_fan_in_pipeline_to_success():
@@ -53,7 +63,7 @@ def test_drives_a_full_fan_out_fan_in_pipeline_to_success():
     driver, repository, blob_store, _ = make_driver(task_instance_runner)
     repository.save(workflow)
 
-    driver.run(tenant_id=tenant_id, workflow=workflow)
+    driver.run(tenant_id=tenant_id, workflow_id=workflow.id)
 
     assert workflow.status == WorkflowStatus.SUCCEEDED
     assert blob_store.get_json(workflow.results["t1"]) == "r1"
@@ -73,7 +83,7 @@ def test_resolves_dependency_outputs_into_real_values_before_calling_the_task_in
     driver, repository, _, _ = make_driver(task_instance_runner)
     repository.save(workflow)
 
-    driver.run(tenant_id=tenant_id, workflow=workflow)
+    driver.run(tenant_id=tenant_id, workflow_id=workflow.id)
 
     t2_inputs = next(inputs for step, inputs in task_instance_runner.calls if step == "t2")
     assert t2_inputs == {"t1": {"text": "lorem ipsum"}}  # the real value, not a blob key
@@ -93,7 +103,7 @@ def test_retries_a_transient_failure_automatically_until_it_succeeds():
     driver, repository, _, _ = make_driver(task_instance_runner)
     repository.save(workflow)
 
-    driver.run(tenant_id=tenant_id, workflow=workflow)
+    driver.run(tenant_id=tenant_id, workflow_id=workflow.id)
 
     assert workflow.status == WorkflowStatus.SUCCEEDED
     assert workflow.tasks["t2"].attempts == 2
@@ -112,7 +122,7 @@ def test_stops_the_whole_workflow_on_a_terminal_failure():
     driver, repository, _, _ = make_driver(task_instance_runner)
     repository.save(workflow)
 
-    driver.run(tenant_id=tenant_id, workflow=workflow)
+    driver.run(tenant_id=tenant_id, workflow_id=workflow.id)
 
     assert workflow.status == WorkflowStatus.FAILED
     assert workflow.failed_step == "t2"
@@ -140,7 +150,7 @@ def test_deferred_step_leaves_workflow_running_with_its_inputs_resolved():
     driver, repository, _, _ = make_driver(task_instance_runner)
     repository.save(workflow)
 
-    driver.run(tenant_id=tenant_id, workflow=workflow)
+    driver.run(tenant_id=tenant_id, workflow_id=workflow.id)
 
     # The runner received the resolved upstream inputs for t2.
     t2_inputs = next(inputs for step, inputs in task_instance_runner.calls if step == "t2")

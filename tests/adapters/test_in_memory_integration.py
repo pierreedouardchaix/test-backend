@@ -1,6 +1,7 @@
 """End-to-end test with the real in-memory adapters (not test doubles) wired
-into the real WorkflowOrchestrator and SynchronousPipelineDriver — proves the
-whole stack articulates correctly together, not just each piece in isolation.
+into the real WorkflowOrchestrator, PipelineStepExecutor and
+SynchronousPipelineDriver — proves the whole stack articulates correctly
+together, not just each piece in isolation.
 
 Uses a scripted FakeTaskInstanceRunner rather than the real ocr/metadata/chunking/
 external_call functions: those have real random sleeps (1-15s) and a 1/3
@@ -12,9 +13,9 @@ import uuid
 
 from src.adapters.in_memory.blob_store import InMemoryBlobStore
 from src.adapters.in_memory.event_publisher import InMemoryEventPublisher
-from src.adapters.in_memory.workflow_repository import InMemoryWorkflowRepository
+from src.adapters.in_memory.unit_of_work import InMemoryUnitOfWork
+from src.application.pipeline_step_executor import PipelineStepExecutor
 from src.application.synchronous_pipeline_driver import SynchronousPipelineDriver
-from src.application.workflow_orchestrator import WorkflowOrchestrator
 from src.domain.models.workflow import Workflow, WorkflowStatus
 from src.domain.models.workflow_definition import StepDefinition, WorkflowDefinition
 from tests.fakes import FakeTaskInstanceRunner
@@ -37,22 +38,24 @@ def test_full_pipeline_runs_to_success_with_real_in_memory_adapters():
     tenant_id = uuid.uuid4()
     workflow = Workflow.create(id=uuid.uuid4(), tenant_id=tenant_id, definition=make_primmo_shaped_definition())
 
-    workflow_repository = InMemoryWorkflowRepository()
+    uow = InMemoryUnitOfWork()
     blob_store = InMemoryBlobStore()
     events = InMemoryEventPublisher()
-    orchestrator = WorkflowOrchestrator(workflow_repository, blob_store, events)
     task_instance_runner = FakeTaskInstanceRunner({
         "ocr": ["lorem ipsum..."],
         "metadata": [{"doc_type": "fake_type"}],
         "chunking": [["chunk_1", "chunk_2"]],
         "external_call": ["j_abc123"],
     })
-    driver = SynchronousPipelineDriver(orchestrator, task_instance_runner, blob_store)
-    workflow_repository.save(workflow)
+    executor = PipelineStepExecutor(
+        uow_factory=lambda: uow, task_instance_runner=task_instance_runner, blob_store=blob_store, event_publisher=events
+    )
+    driver = SynchronousPipelineDriver(executor, uow.workflows)
+    uow.workflows.save(workflow)
 
-    driver.run(tenant_id=tenant_id, workflow=workflow)
+    driver.run(tenant_id=tenant_id, workflow_id=workflow.id)
 
-    persisted = workflow_repository.get(workflow.id, tenant_id=tenant_id)
+    persisted = uow.workflows.get(workflow.id, tenant_id=tenant_id)
     assert persisted.status == WorkflowStatus.SUCCEEDED
     assert blob_store.get(persisted.results["ocr"]) is not None
     assert {step for step, _ in task_instance_runner.calls} == {"ocr", "metadata", "chunking", "external_call"}
@@ -73,17 +76,19 @@ def test_full_pipeline_ends_failed_when_a_step_exhausts_its_retries_with_real_in
     )
     workflow = Workflow.create(id=uuid.uuid4(), tenant_id=tenant_id, definition=definition)
 
-    workflow_repository = InMemoryWorkflowRepository()
+    uow = InMemoryUnitOfWork()
     blob_store = InMemoryBlobStore()
     events = InMemoryEventPublisher()
-    orchestrator = WorkflowOrchestrator(workflow_repository, blob_store, events)
     task_instance_runner = FakeTaskInstanceRunner({"ocr": [TimeoutError("OCR provider timeout")]})
-    driver = SynchronousPipelineDriver(orchestrator, task_instance_runner, blob_store)
-    workflow_repository.save(workflow)
+    executor = PipelineStepExecutor(
+        uow_factory=lambda: uow, task_instance_runner=task_instance_runner, blob_store=blob_store, event_publisher=events
+    )
+    driver = SynchronousPipelineDriver(executor, uow.workflows)
+    uow.workflows.save(workflow)
 
-    driver.run(tenant_id=tenant_id, workflow=workflow)
+    driver.run(tenant_id=tenant_id, workflow_id=workflow.id)
 
-    persisted = workflow_repository.get(workflow.id, tenant_id=tenant_id)
+    persisted = uow.workflows.get(workflow.id, tenant_id=tenant_id)
     assert persisted.status == WorkflowStatus.FAILED
     assert persisted.failed_step == "ocr"
     assert {step for step, _ in task_instance_runner.calls} == {"ocr"}  # nothing downstream ever ran
