@@ -1,4 +1,7 @@
+import os
+
 from fastapi import Depends, FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.application.apply_partner_callback import WorkflowNotFound
@@ -10,6 +13,18 @@ from src.routers import auth, dev, documents, webhooks
 
 configure_logging()
 app = FastAPI()
+
+# Dev-only permissive CORS so a local browser tool can exercise the API. Read
+# from the env directly (not Settings) to keep importing this module free of the
+# full config in tests. Off unless DEV_MODE — production stays same-origin only.
+if os.getenv("DEV_MODE", "false").lower() == "true":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
 app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(dev.router)
