@@ -73,8 +73,15 @@ def get_document_results(
     row = GetDocumentUseCase(data_source).execute(
         GetDocumentQuery(document_id=document_id, tenant_id=auth.tenant_id)
     )
+    if row.workflow_status == "failed":
+        # Terminal: results will never come. Distinct from "still running" so a
+        # polling client stops instead of retrying forever.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Processing failed at step '{row.failed_step}': {row.failure_reason}",
+        )
     if row.workflow_status != "succeeded":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Results not yet available")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Results not yet available (still processing)")
     return DocumentResultsResponse.from_row(row)
 
 
