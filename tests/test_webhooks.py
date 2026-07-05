@@ -25,7 +25,7 @@ _settings = Settings(
 
 def _workflow_awaiting_callback(job_id: uuid.UUID) -> Workflow:
     wf = Workflow.create(id=job_id, tenant_id=TENANT, definition=PRIMMO_DEFINITION)
-    for step in ("ocr", "metadata", "chunking", "agent"):
+    for step in ("ocr", "metadata", "chunking"):
         wf.start_task(step)
         wf.on_task_succeeded(step, f"blob-{step}")
     wf.start_task("external_call")

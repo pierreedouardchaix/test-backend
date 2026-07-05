@@ -18,11 +18,11 @@ TENANT_B = uuid.uuid4()
 
 
 def _workflow_awaiting_callback(tenant_id: uuid.UUID, job_id: uuid.UUID) -> Workflow:
-    """A workflow whose four upstream steps are done and whose external_call
+    """A workflow whose three upstream steps are done and whose external_call
     task has been dispatched (RUNNING) — exactly the state in which the partner
     webhook is expected to arrive."""
     wf = Workflow.create(id=job_id, tenant_id=tenant_id, definition=PRIMMO_DEFINITION)
-    for step in ("ocr", "metadata", "chunking", "agent"):
+    for step in ("ocr", "metadata", "chunking"):
         wf.start_task(step)
         wf.on_task_succeeded(step, f"blob-{step}")
     wf.start_task("external_call")

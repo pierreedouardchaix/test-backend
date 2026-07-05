@@ -20,7 +20,6 @@ class InMemoryTaskInstanceRunner:
             "ocr": self._ocr,
             "metadata": self._metadata,
             "chunking": self._chunking,
-            "agent": self._agent,
             "external_call": self._external_call,
         }
 
@@ -46,19 +45,9 @@ class InMemoryTaskInstanceRunner:
     def _chunking(self, *, document_id, tenant_id, inputs) -> Any:
         return agents.chunking(inputs["ocr"])
 
-    def _agent(self, *, document_id, tenant_id, inputs) -> Any:
-        # Placeholder for the "sortie agent" step (see dev_considerations.md,
-        # step 5): a step we added ourselves, not one of the README's fixed
-        # mocks (src/agents.py), so no injected sleep/failure — deterministic
-        # enrichment ahead of the partner call.
-        return {
-            "doc_type": inputs["metadata"]["doc_type"],
-            "chunk_count": len(inputs["chunking"]),
-        }
-
     def _external_call(self, *, document_id, tenant_id, inputs) -> Deferred:
         # Simulated outgoing call — may raise ConnectionError (retried like any step failure).
-        # Returns an opaque job_id we don't store; correlation is via document_id.
+        # Returns an opaque job_id we don't store yet; correlation is via document_id.
         agents.external_call(
             doc_id=str(document_id),
             ocr_text=inputs["ocr"],

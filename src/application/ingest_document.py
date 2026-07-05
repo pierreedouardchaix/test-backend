@@ -15,10 +15,9 @@ PRIMMO_DEFINITION = WorkflowDefinition(
         StepDefinition(name="ocr"),
         StepDefinition(name="metadata", depends_on=frozenset({"ocr"})),
         StepDefinition(name="chunking", depends_on=frozenset({"ocr"})),
-        StepDefinition(name="agent", depends_on=frozenset({"metadata", "chunking"})),
         StepDefinition(
             name="external_call",
-            depends_on=frozenset({"ocr", "metadata", "chunking", "agent"}),
+            depends_on=frozenset({"ocr", "metadata", "chunking"}),
         ),
     ),
 )
