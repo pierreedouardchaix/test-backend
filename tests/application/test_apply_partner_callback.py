@@ -5,6 +5,7 @@ import pytest
 
 from src.application.apply_partner_callback import (
     ApplyPartnerCallbackUseCase,
+    CallbackPremature,
     PartnerCallbackCommand,
     WorkflowNotFound,
 )
@@ -99,6 +100,36 @@ def test_replayed_callback_is_a_silent_noop():
     assert replay.workflow_status == WorkflowStatus.SUCCEEDED.value
     # Nothing re-applied: no new event, result unchanged.
     assert len(events.published) == events_after_first
+
+
+def test_completed_callback_on_the_terminal_step_unblocks_nothing():
+    job_id = uuid.uuid4()
+    uow = FakeUnitOfWork()
+    uow.workflows.save(_workflow_awaiting_callback(TENANT_A, job_id))
+
+    result = _use_case(uow).execute(
+        PartnerCallbackCommand(partner_job_id=PARTNER_JOB_ID, step_name="external_call", succeeded=True, result={})
+    )
+
+    # external_call is the last node — its success completes the DAG, nothing new is ready.
+    assert result.newly_ready == frozenset()
+    assert result.workflow_status == WorkflowStatus.SUCCEEDED.value
+
+
+def test_callback_on_a_retrying_task_is_premature():
+    """The partner processed the job, but our own external_call attempt failed
+    transiently and is RETRYING (not RUNNING). The callback arrived too early to
+    apply — the use case signals the caller to retry."""
+    job_id = uuid.uuid4()
+    uow = FakeUnitOfWork()
+    workflow = _workflow_awaiting_callback(TENANT_A, job_id)
+    workflow.on_task_failed("external_call", "our transient timeout")  # RUNNING -> RETRYING
+    uow.workflows.save(workflow)
+
+    with pytest.raises(CallbackPremature):
+        _use_case(uow).execute(
+            PartnerCallbackCommand(partner_job_id=PARTNER_JOB_ID, step_name="external_call", succeeded=True, result={})
+        )
 
 
 def test_unknown_job_id_raises():

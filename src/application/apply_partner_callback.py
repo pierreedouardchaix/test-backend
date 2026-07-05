@@ -1,16 +1,26 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from src.application.unit_of_work import UnitOfWork
 from src.application.workflow_orchestrator import WorkflowOrchestrator
 from src.application.write_use_case import WriteUseCase
+from src.domain.models.task import TaskStatus
 from src.domain.models.workflow import WorkflowStatus
 from src.ports.blob_store import BlobStore
 from src.ports.event_publisher import EventPublisher
 
+_TERMINAL_TASK_STATUSES = (TaskStatus.SUCCEEDED, TaskStatus.FAILED)
+
 
 class WorkflowNotFound(Exception):
     """No task matches the callback's partner_job_id → the endpoint answers 404."""
+
+
+class CallbackPremature(Exception):
+    """The callback's target task exists but isn't RUNNING yet (e.g. our own
+    attempt is still RETRYING after a transient failure on our side, while the
+    partner has already processed the job). Transient — the caller should retry
+    the callback later, once our side settles into RUNNING."""
 
 
 @dataclass(frozen=True)
@@ -26,17 +36,19 @@ class PartnerCallbackCommand:
 class PartnerCallbackResult:
     workflow_status: str
     already_processed: bool
+    newly_ready: frozenset[str] = field(default_factory=frozenset)  # steps unblocked, for the caller to dispatch
 
 
 class ApplyPartnerCallbackUseCase(WriteUseCase[PartnerCallbackCommand, PartnerCallbackResult]):
     """Applies a partner webhook to the step named in the command, through the
     same WorkflowOrchestrator every other trigger funnels through.
 
-    Idempotent by design: the partner retries on non-2xx, so a callback that
-    lands after the step is already terminal is a silent no-op (the endpoint
-    still answers 200). Correlation is by the partner's own job id (unique
-    across tasks); the tenant and our workflow id are resolved from the stored
-    workflow, never trusted from the request body.
+    Idempotent at the **task** level: the partner retries on non-2xx, so a
+    callback landing after the step's task is already terminal is a silent
+    no-op. The task-level check (not just workflow-terminal) is deliberate — it
+    survives a DAG where the deferred step is no longer the last node. Correlation
+    is by the partner's own job id (unique across tasks); the tenant and our
+    workflow id are resolved from the stored workflow, never from the request body.
     """
 
     def __init__(self, uow: UnitOfWork, blob_store: BlobStore, event_publisher: EventPublisher) -> None:
@@ -49,27 +61,39 @@ class ApplyPartnerCallbackUseCase(WriteUseCase[PartnerCallbackCommand, PartnerCa
         if workflow is None:
             raise WorkflowNotFound(command.partner_job_id)
 
-        # Already terminal → this callback was handled (or superseded) already.
+        task = workflow.tasks.get(command.step_name)
+        # Task-level idempotence: the step already reached a terminal outcome →
+        # this callback (a partner retry, or a duplicate delivery) is a no-op.
+        if task is not None and task.status in _TERMINAL_TASK_STATUSES:
+            return PartnerCallbackResult(workflow_status=workflow.status.value, already_processed=True)
+        # Workflow already terminal for another reason (e.g. a sibling step failed)
+        # → nothing to apply. Belt-and-suspenders alongside the task check above.
         if workflow.status != WorkflowStatus.RUNNING:
             return PartnerCallbackResult(workflow_status=workflow.status.value, already_processed=True)
+        # Task missing or not yet RUNNING (e.g. still RETRYING on our side) → the
+        # callback got here before we're ready; ask the caller to retry.
+        if task is None or task.status != TaskStatus.RUNNING:
+            raise CallbackPremature(command.partner_job_id)
 
         orchestrator = WorkflowOrchestrator(self._uow.workflows, self._blob_store, self._events)
-        tenant_id = workflow.tenant_id
-        workflow_id = workflow.id
         if command.succeeded:
-            orchestrator.handle_step_success(
-                tenant_id=tenant_id,
-                workflow_id=workflow_id,
+            newly_ready = orchestrator.handle_step_success(
+                tenant_id=workflow.tenant_id,
+                workflow_id=workflow.id,
                 step_name=command.step_name,
                 result=command.result,
             )
-        else:
-            orchestrator.handle_terminal_failure(
-                tenant_id=tenant_id,
-                workflow_id=workflow_id,
-                step_name=command.step_name,
-                error=command.error or "partner reported failure",
+            # Status deducible from the path, no refetch: more steps unblocked →
+            # still running; none → this completed the DAG → succeeded.
+            status = WorkflowStatus.RUNNING if newly_ready else WorkflowStatus.SUCCEEDED
+            return PartnerCallbackResult(
+                workflow_status=status.value, already_processed=False, newly_ready=newly_ready
             )
 
-        updated = self._uow.workflows.get_by_id(workflow_id)
-        return PartnerCallbackResult(workflow_status=updated.status.value, already_processed=False)
+        orchestrator.handle_terminal_failure(
+            tenant_id=workflow.tenant_id,
+            workflow_id=workflow.id,
+            step_name=command.step_name,
+            error=command.error or "partner reported failure",
+        )
+        return PartnerCallbackResult(workflow_status=WorkflowStatus.FAILED.value, already_processed=False)
