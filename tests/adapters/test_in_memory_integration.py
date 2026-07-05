@@ -28,7 +28,7 @@ def make_primmo_shaped_definition() -> WorkflowDefinition:
             StepDefinition(name="ocr"),
             StepDefinition(name="metadata", depends_on=frozenset({"ocr"})),
             StepDefinition(name="chunking", depends_on=frozenset({"ocr"})),
-            StepDefinition(name="external_call", depends_on=frozenset({"metadata", "chunking"}), max_attempts=2),
+            StepDefinition(name="external_call", depends_on=frozenset({"ocr", "metadata", "chunking"}), max_attempts=2),
         ),
     )
 
@@ -68,7 +68,7 @@ def test_full_pipeline_ends_failed_when_a_step_exhausts_its_retries_with_real_in
             StepDefinition(name="ocr", max_attempts=1),
             StepDefinition(name="metadata", depends_on=frozenset({"ocr"})),
             StepDefinition(name="chunking", depends_on=frozenset({"ocr"})),
-            StepDefinition(name="external_call", depends_on=frozenset({"metadata", "chunking"})),
+            StepDefinition(name="external_call", depends_on=frozenset({"ocr", "metadata", "chunking"})),
         ),
     )
     workflow = Workflow.create(id=uuid.uuid4(), tenant_id=tenant_id, definition=definition)

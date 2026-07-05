@@ -94,7 +94,9 @@ def test_handle_step_success_publishes_one_event_with_the_expected_payload():
         "step": "t1",
         "step_status": TaskStatus.SUCCEEDED,
         "workflow_status": WorkflowStatus.RUNNING,
+        "attempt": 1,
     }
+    assert "error" not in published["event"]  # success events carry no error
 
 
 def test_handle_step_failure_returns_retrying_when_attempts_remain():
@@ -112,6 +114,29 @@ def test_handle_step_failure_returns_retrying_when_attempts_remain():
 
     assert status == TaskStatus.RETRYING
     assert repository.get(workflow.id, tenant_id=tenant_id).status == WorkflowStatus.RUNNING
+
+
+def test_handle_step_failure_publishes_an_event_recording_the_failed_task_instance():
+    orchestrator, repository, _, events = make_orchestrator()
+    tenant_id = uuid.uuid4()
+    workflow = make_workflow(tenant_id=tenant_id, t2=3)
+    repository.save(workflow)
+    orchestrator.start_task(tenant_id=tenant_id, workflow_id=workflow.id, step_name="t1")
+    orchestrator.handle_step_success(tenant_id=tenant_id, workflow_id=workflow.id, step_name="t1", result="r1")
+    orchestrator.start_task(tenant_id=tenant_id, workflow_id=workflow.id, step_name="t2")
+
+    orchestrator.handle_step_failure(
+        tenant_id=tenant_id, workflow_id=workflow.id, step_name="t2", error="metadata extraction failed"
+    )
+
+    published = events.published[-1]["event"]
+    assert published == {
+        "step": "t2",
+        "step_status": TaskStatus.RETRYING,
+        "workflow_status": WorkflowStatus.RUNNING,
+        "attempt": 1,
+        "error": "metadata extraction failed",
+    }
 
 
 def test_handle_step_failure_returns_failed_when_attempts_exhausted():

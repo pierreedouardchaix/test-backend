@@ -99,12 +99,15 @@ class WorkflowOrchestrator:
 
     def _publish(self, *, tenant_id: uuid.UUID, workflow, step_name: str) -> None:
         task = workflow.tasks[step_name]
-        self._events.publish(
-            tenant_id=tenant_id,
-            document_id=workflow.id,
-            event={
-                "step": step_name,
-                "step_status": task.status,
-                "workflow_status": workflow.status,
-            },
-        )
+        event = {
+            "step": step_name,
+            "step_status": task.status,
+            "workflow_status": workflow.status,
+            "attempt": task.attempts,
+        }
+        # A retrying/failed status is the outcome of a task instance that just
+        # failed — carry its error so the failed attempt is recorded, not just
+        # the fact that the task is now waiting to retry.
+        if task.status in (TaskStatus.RETRYING, TaskStatus.FAILED):
+            event["error"] = task.last_error
+        self._events.publish(tenant_id=tenant_id, document_id=workflow.id, event=event)
