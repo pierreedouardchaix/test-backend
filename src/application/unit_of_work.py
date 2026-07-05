@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import Protocol, Self
 
 from src.ports.document_repository import DocumentRepository
 from src.ports.tenant_repository import TenantRepository
@@ -17,7 +17,7 @@ class UnitOfWork(Protocol):
     documents: DocumentRepository
     workflows: WorkflowRepository
 
-    def __enter__(self) -> "UnitOfWork": ...
+    def __enter__(self) -> Self: ...
 
     def __exit__(self, exc_type, exc, tb) -> None: ...
 

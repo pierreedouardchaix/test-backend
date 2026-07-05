@@ -1,3 +1,5 @@
+from typing import Self
+
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.adapters.sql.document_repository import SqlAlchemyDocumentRepository
@@ -18,7 +20,7 @@ class SqlAlchemyUnitOfWork:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
 
-    def __enter__(self) -> "SqlAlchemyUnitOfWork":
+    def __enter__(self) -> Self:
         self._session = self._session_factory()
         self.tenants = SqlAlchemyTenantRepository(self._session)
         self.documents = SqlAlchemyDocumentRepository(self._session)

@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from typing import Self
 
 
 @dataclass(frozen=True)
@@ -10,7 +11,7 @@ class Settings:
     dev_mode: bool
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Self:
         return cls(
             database_url=os.environ["DATABASE_URL"],
             jwt_secret=os.environ["JWT_SECRET"],

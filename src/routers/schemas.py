@@ -1,6 +1,8 @@
 import uuid
 from datetime import datetime
 
+from typing import Self
+
 from pydantic import BaseModel, ConfigDict
 
 from src.ports.document_data_source import DocumentDetailRow, DocumentRow, TaskRow
@@ -38,7 +40,7 @@ class DocumentSummaryResponse(BaseModel):
     failure_reason: str | None
 
     @classmethod
-    def from_row(cls, row: DocumentRow) -> "DocumentSummaryResponse":
+    def from_row(cls, row: DocumentRow) -> Self:
         return cls(
             document_id=row.document_id,
             filename=row.filename,
@@ -64,7 +66,7 @@ class DocumentDetailResponse(BaseModel):
     workflow: WorkflowResponse
 
     @classmethod
-    def from_row(cls, row: DocumentDetailRow) -> "DocumentDetailResponse":
+    def from_row(cls, row: DocumentDetailRow) -> Self:
         return cls(
             document_id=row.document_id,
             filename=row.filename,
