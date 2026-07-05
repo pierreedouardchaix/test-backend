@@ -4,6 +4,7 @@ import uuid
 from src.domain.models.document import Document
 from src.domain.models.tenant import Tenant
 from src.domain.models.workflow import Workflow
+from src.ports.document_data_source import DocumentRow
 
 
 class FakeWorkflowRepository:
@@ -72,6 +73,17 @@ class FakeDocumentRepository:
 
     def list_by_tenant(self, tenant_id: uuid.UUID) -> list[Document]:
         return [d for d in self.saved.values() if d.tenant_id == tenant_id]
+
+
+class FakeDocumentDataSource:
+    def __init__(self) -> None:
+        self._rows: list[DocumentRow] = []
+
+    def list_by_tenant(self, tenant_id: uuid.UUID) -> list[DocumentRow]:
+        return [r for r in self._rows if r.tenant_id == tenant_id]
+
+    def add(self, row: DocumentRow) -> None:
+        self._rows.append(row)
 
 
 class FakeWorkflowDispatcher:
