@@ -141,7 +141,7 @@ class FakeTaskInstanceRunner:
         self._behaviors = {step: list(outcomes) for step, outcomes in behaviors.items()}
         self.calls: list[tuple[str, dict]] = []
 
-    def run_step(self, step_name, *, document_id, inputs):
+    def run_step(self, step_name, *, tenant_id, document_id, inputs):
         self.calls.append((step_name, inputs))
         outcome = self._behaviors[step_name].pop(0)
         if isinstance(outcome, Exception):

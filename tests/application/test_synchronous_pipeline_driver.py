@@ -2,9 +2,16 @@ import uuid
 
 from src.application.synchronous_pipeline_driver import SynchronousPipelineDriver
 from src.application.workflow_orchestrator import WorkflowOrchestrator
+from src.domain.models.task import TaskStatus
 from src.domain.models.workflow import Workflow, WorkflowStatus
 from src.domain.models.workflow_definition import StepDefinition, WorkflowDefinition
-from tests.fakes import FakeBlobStore, FakeEventPublisher, FakeTaskInstanceRunner, FakeWorkflowRepository
+from src.ports.task_instance_runner import DEFERRED
+from tests.fakes import (
+    FakeBlobStore,
+    FakeEventPublisher,
+    FakeTaskInstanceRunner,
+    FakeWorkflowRepository,
+)
 
 
 def make_definition(**step_overrides: int) -> WorkflowDefinition:
@@ -110,3 +117,36 @@ def test_stops_the_whole_workflow_on_a_terminal_failure():
     assert workflow.status == WorkflowStatus.FAILED
     assert workflow.failed_step == "t2"
     assert "t4" not in {step for step, _ in task_instance_runner.calls}
+
+
+def _callback_definition() -> WorkflowDefinition:
+    """t1 -> t2, where t2 hands off to an external executor and waits."""
+    return WorkflowDefinition(
+        name="callback_pipeline",
+        steps=(
+            StepDefinition(name="t1"),
+            StepDefinition(name="t2", depends_on=frozenset({"t1"})),
+        ),
+    )
+
+
+def test_deferred_step_leaves_workflow_running_with_its_inputs_resolved():
+    tenant_id = uuid.uuid4()
+    workflow = Workflow.create(id=uuid.uuid4(), tenant_id=tenant_id, definition=_callback_definition())
+    task_instance_runner = FakeTaskInstanceRunner({
+        "t1": [{"text": "extracted"}],
+        "t2": [DEFERRED],  # runner signals: handed off, wait for callback
+    })
+    driver, repository, _, _ = make_driver(task_instance_runner)
+    repository.save(workflow)
+
+    driver.run(tenant_id=tenant_id, workflow=workflow)
+
+    # The runner received the resolved upstream inputs for t2.
+    t2_inputs = next(inputs for step, inputs in task_instance_runner.calls if step == "t2")
+    assert t2_inputs == {"t1": {"text": "extracted"}}
+
+    # The workflow is left running — nothing is newly ready until the callback arrives.
+    assert workflow.status == WorkflowStatus.RUNNING
+    assert workflow.tasks["t2"].status == TaskStatus.RUNNING
+    assert "t2" not in workflow.results
