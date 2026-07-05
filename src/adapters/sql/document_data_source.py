@@ -67,6 +67,7 @@ class SqlAlchemyDocumentDataSource:
             workflow_status=wf.status,
             failed_step=wf.failed_step,
             failure_reason=wf.failure_reason,
+            step_results=wf.results or {},
             tasks=tuple(
                 TaskRow(
                     step_name=t.step_name,

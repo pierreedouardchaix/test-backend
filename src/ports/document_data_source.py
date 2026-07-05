@@ -46,6 +46,7 @@ class DocumentDetailRow:
     workflow_status: str
     failed_step: str | None
     failure_reason: str | None
+    step_results: dict[str, str]  # step_name → blob_key
     tasks: tuple[TaskRow, ...]
 
 
