@@ -50,8 +50,8 @@ class WorkflowOrchestrator:
 
         task = workflow.start_task(step_name)
 
-        self._workflow_repository.save(workflow)
-        self._publish(tenant_id=tenant_id, workflow=workflow, step_name=step_name)
+        version = self._workflow_repository.save(workflow)
+        self._publish(tenant_id=tenant_id, workflow=workflow, step_name=step_name, version=version)
         return task
 
     def handle_step_success(
@@ -68,8 +68,8 @@ class WorkflowOrchestrator:
         blob_key = self._blob_store.put(json.dumps(result).encode(), content_type="application/json")
         ready_steps = workflow.on_task_succeeded(step_name, blob_key)
 
-        self._workflow_repository.save(workflow)
-        self._publish(tenant_id=tenant_id, workflow=workflow, step_name=step_name)
+        version = self._workflow_repository.save(workflow)
+        self._publish(tenant_id=tenant_id, workflow=workflow, step_name=step_name, version=version)
         return ready_steps
 
     def handle_step_failure(
@@ -87,8 +87,8 @@ class WorkflowOrchestrator:
 
         workflow.on_task_failed(step_name, error)
 
-        self._workflow_repository.save(workflow)
-        self._publish(tenant_id=tenant_id, workflow=workflow, step_name=step_name)
+        version = self._workflow_repository.save(workflow)
+        self._publish(tenant_id=tenant_id, workflow=workflow, step_name=step_name, version=version)
         return workflow.tasks[step_name].status
 
     def handle_step_deferred(
@@ -121,8 +121,8 @@ class WorkflowOrchestrator:
 
         workflow.on_callback_failed(step_name, error)
 
-        self._workflow_repository.save(workflow)
-        self._publish(tenant_id=tenant_id, workflow=workflow, step_name=step_name)
+        version = self._workflow_repository.save(workflow)
+        self._publish(tenant_id=tenant_id, workflow=workflow, step_name=step_name, version=version)
 
     def _require_workflow(self, workflow_id: uuid.UUID, *, tenant_id: uuid.UUID):
         workflow = self._workflow_repository.get(workflow_id, tenant_id=tenant_id)
@@ -130,13 +130,16 @@ class WorkflowOrchestrator:
             raise ValueError(f"Unknown workflow {workflow_id} for tenant {tenant_id}")
         return workflow
 
-    def _publish(self, *, tenant_id: uuid.UUID, workflow, step_name: str) -> None:
+    def _publish(self, *, tenant_id: uuid.UUID, workflow, step_name: str, version: int) -> None:
         task = workflow.tasks[step_name]
         event = {
             "step": step_name,
             "step_status": task.status,
             "workflow_status": workflow.status,
             "attempt": task.attempts,
+            # Per-workflow monotonic version (bumped in the same tx as the mutation):
+            # lets a client order events and drop stale/duplicate ones.
+            "version": version,
         }
         # A retrying/failed status is the outcome of a task instance that just
         # failed — carry its error so the failed attempt is recorded, not just

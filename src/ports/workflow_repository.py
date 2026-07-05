@@ -21,4 +21,9 @@ class WorkflowRepository(Protocol):
         workflow. The caller derives the tenant from the returned workflow."""
         ...
 
-    def save(self, workflow: Workflow) -> None: ...
+    def save(self, workflow: Workflow) -> int:
+        """Persist the workflow and return its new version — a per-workflow
+        monotonic counter, bumped in the same transaction as the mutation. The
+        orchestrator carries it on each published event so a client can order
+        events and drop stale/duplicate ones (SSE has no ordering guarantee)."""
+        ...

@@ -44,6 +44,7 @@ class DocumentDetailRow:
     size_bytes: int
     created_at: datetime
     workflow_status: str
+    workflow_version: int  # per-workflow monotonic version — seeds the SSE snapshot's event ordering
     failed_step: str | None
     failure_reason: str | None
     # The partner's job id for the deferred step, exposed so a tester can copy

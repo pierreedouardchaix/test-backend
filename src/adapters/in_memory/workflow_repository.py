@@ -6,6 +6,7 @@ from src.domain.models.workflow import Workflow
 class InMemoryWorkflowRepository:
     def __init__(self) -> None:
         self._workflows: dict[uuid.UUID, Workflow] = {}
+        self._versions: dict[uuid.UUID, int] = {}
 
     def get(self, workflow_id: uuid.UUID, *, tenant_id: uuid.UUID) -> Workflow | None:
         workflow = self._workflows.get(workflow_id)
@@ -22,5 +23,8 @@ class InMemoryWorkflowRepository:
                 return workflow
         return None
 
-    def save(self, workflow: Workflow) -> None:
+    def save(self, workflow: Workflow) -> int:
         self._workflows[workflow.id] = workflow
+        version = self._versions.get(workflow.id, 0) + 1
+        self._versions[workflow.id] = version
+        return version

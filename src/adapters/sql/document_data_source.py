@@ -68,6 +68,7 @@ class SqlAlchemyDocumentDataSource:
             size_bytes=doc.size_bytes,
             created_at=doc.created_at,
             workflow_status=wf.status,
+            workflow_version=wf.version,
             failed_step=wf.failed_step,
             failure_reason=wf.failure_reason,
             # At most one task carries a partner job id (the deferred external_call).

@@ -54,16 +54,17 @@ class SqlAlchemyWorkflowRepository:
         self._loaded_versions[row.id] = row.version
         return workflow_from_orm(row, task_rows)
 
-    def save(self, workflow: Workflow) -> None:
+    def save(self, workflow: Workflow) -> int:
         loaded_version = self._loaded_versions.get(workflow.id)
         if loaded_version is None:
-            self._insert(workflow)
+            version = self._insert(workflow)
         else:
-            self._update(workflow, loaded_version)
+            version = self._update(workflow, loaded_version)
         for task in workflow.tasks.values():
             self._session.merge(task_to_orm(task, workflow.tenant_id))
+        return version
 
-    def _insert(self, workflow: Workflow) -> None:
+    def _insert(self, workflow: Workflow) -> int:
         self._session.add(
             WorkflowORM(
                 id=workflow.id,
@@ -79,8 +80,10 @@ class SqlAlchemyWorkflowRepository:
         )
         self._session.flush()  # emit the INSERT before the task rows FK-reference it
         self._loaded_versions[workflow.id] = 1
+        return 1
 
-    def _update(self, workflow: Workflow, loaded_version: int) -> None:
+    def _update(self, workflow: Workflow, loaded_version: int) -> int:
+        new_version = loaded_version + 1
         result = self._session.execute(
             update(WorkflowORM)
             .where(WorkflowORM.id == workflow.id, WorkflowORM.version == loaded_version)
@@ -89,11 +92,12 @@ class SqlAlchemyWorkflowRepository:
                 results=dict(workflow.results),
                 failed_step=workflow.failed_step,
                 failure_reason=workflow.failure_reason,
-                version=loaded_version + 1,
+                version=new_version,
             )
         )
         if result.rowcount == 0:
             raise ConcurrencyError(
                 f"workflow {workflow.id} was modified concurrently (expected version {loaded_version})"
             )
-        self._loaded_versions[workflow.id] = loaded_version + 1
+        self._loaded_versions[workflow.id] = new_version
+        return new_version

@@ -34,6 +34,7 @@ def _detail(
         size_bytes=1024,
         created_at=datetime.now(tz=timezone.utc),
         workflow_status=workflow_status,
+        workflow_version=1,
         failed_step=failed_step,
         failure_reason=failure_reason,
         partner_job_id=partner_job_id,

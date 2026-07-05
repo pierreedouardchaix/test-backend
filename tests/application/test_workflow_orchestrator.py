@@ -90,13 +90,29 @@ def test_handle_step_success_publishes_one_event_with_the_expected_payload():
     published = events.published[-1]
     assert published["tenant_id"] == tenant_id
     assert published["document_id"] == workflow.id  # same id, no separate document_id anywhere
-    assert published["event"] == {
+    event = dict(published["event"])
+    assert isinstance(event.pop("version"), int)  # monotonic version present on every event
+    assert event == {
         "step": "t1",
         "step_status": TaskStatus.SUCCEEDED,
         "workflow_status": WorkflowStatus.RUNNING,
         "attempt": 1,
     }
     assert "error" not in published["event"]  # success events carry no error
+
+
+def test_each_published_event_carries_a_strictly_increasing_version():
+    orchestrator, repository, _, events = make_orchestrator()
+    tenant_id = uuid.uuid4()
+    workflow = make_workflow(tenant_id=tenant_id)
+    repository.save(workflow)
+
+    orchestrator.start_task(tenant_id=tenant_id, workflow_id=workflow.id, step_name="t1")
+    orchestrator.handle_step_success(tenant_id=tenant_id, workflow_id=workflow.id, step_name="t1", result="r1")
+
+    versions = [e["event"]["version"] for e in events.published]
+    assert versions == sorted(versions)
+    assert len(set(versions)) == len(versions)  # strictly increasing, no duplicates
 
 
 def test_handle_step_failure_returns_retrying_when_attempts_remain():
@@ -129,7 +145,8 @@ def test_handle_step_failure_publishes_an_event_recording_the_failed_task_instan
         tenant_id=tenant_id, workflow_id=workflow.id, step_name="t2", error="metadata extraction failed"
     )
 
-    published = events.published[-1]["event"]
+    published = dict(events.published[-1]["event"])
+    assert isinstance(published.pop("version"), int)  # monotonic version present on every event
     assert published == {
         "step": "t2",
         "step_status": TaskStatus.RETRYING,

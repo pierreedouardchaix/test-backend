@@ -45,6 +45,7 @@ def _detail_row() -> DocumentDetailRow:
         size_bytes=10,
         created_at=datetime.now(tz=timezone.utc),
         workflow_status="running",
+        workflow_version=3,
         failed_step=None,
         failure_reason=None,
         partner_job_id=None,

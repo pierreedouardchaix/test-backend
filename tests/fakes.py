@@ -10,6 +10,7 @@ from src.ports.document_data_source import DocumentDetailRow, DocumentRow
 class FakeWorkflowRepository:
     def __init__(self):
         self.saved: dict[uuid.UUID, Workflow] = {}
+        self._versions: dict[uuid.UUID, int] = {}
 
     def get(self, workflow_id: uuid.UUID, *, tenant_id: uuid.UUID) -> Workflow | None:
         workflow = self.saved.get(workflow_id)
@@ -26,8 +27,11 @@ class FakeWorkflowRepository:
                 return workflow
         return None
 
-    def save(self, workflow: Workflow) -> None:
+    def save(self, workflow: Workflow) -> int:
         self.saved[workflow.id] = workflow
+        version = self._versions.get(workflow.id, 0) + 1
+        self._versions[workflow.id] = version
+        return version
 
 
 class FakeBlobStore:
