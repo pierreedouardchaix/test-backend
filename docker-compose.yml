@@ -1,7 +1,46 @@
 services:
+  # One-off: applies migrations then exits. The app waits for it to succeed,
+  # so `docker compose up` always starts against an up-to-date schema — the
+  # reviewer never runs alembic by hand. (Seed will hang off the same pattern
+  # in step 3.)
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://primmo:primmo@postgres:5432/primmo
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   app:
     build: .
     ports:
       - "8000:8000"
     volumes:
       - .:/app
+    environment:
+      DATABASE_URL: postgresql+psycopg://primmo:primmo@postgres:5432/primmo
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: primmo
+      POSTGRES_PASSWORD: primmo
+      POSTGRES_DB: primmo
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U primmo -d primmo"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:
