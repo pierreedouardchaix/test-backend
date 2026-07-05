@@ -20,6 +20,7 @@ def _detail(
     tasks: tuple[TaskRow, ...] = (),
     failed_step: str | None = None,
     failure_reason: str | None = None,
+    step_results: dict | None = None,
 ) -> DocumentDetailRow:
     return DocumentDetailRow(
         document_id=document_id,
@@ -34,6 +35,7 @@ def _detail(
         workflow_status=workflow_status,
         failed_step=failed_step,
         failure_reason=failure_reason,
+        step_results=step_results or {},
         tasks=tasks,
     )
 
