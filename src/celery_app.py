@@ -15,6 +15,7 @@ import uuid
 from typing import Any
 
 from celery import Celery
+from sqlalchemy.exc import OperationalError
 
 from src.adapters.in_memory.task_instance_runner import InMemoryTaskInstanceRunner
 from src.application.apply_partner_callback import (
@@ -22,7 +23,7 @@ from src.application.apply_partner_callback import (
     CallbackPremature,
     PartnerCallbackCommand,
 )
-from src.application.concurrency import run_with_retry
+from src.application.concurrency import ConcurrencyError, run_with_retry
 from src.application.pipeline_step_executor import PipelineStepExecutor
 from src.bootstrap import get_blob_store, get_event_publisher, new_unit_of_work
 from src.logging_config import configure_logging, get_logger
@@ -57,7 +58,19 @@ def run_pipeline_step(tenant_id: str, workflow_id: str, step_name: str) -> None:
         run_pipeline_step.delay(tenant_id=tenant_id, workflow_id=workflow_id, step_name=next_step_name)
 
 
-@celery_app.task(name="webhooks.apply_partner_callback", bind=True, max_retries=5, default_retry_delay=30)
+@celery_app.task(
+    name="webhooks.apply_partner_callback",
+    bind=True,
+    max_retries=5,
+    default_retry_delay=30,
+    # The partner already got its 202 and will never re-deliver, so an infra
+    # failure here must not silently drop the callback. Auto-retry the two
+    # transient infra conditions — the DB being unavailable (OperationalError)
+    # and optimistic-lock contention that outlasted run_with_retry's own budget
+    # (ConcurrencyError) — instead of letting the task die and freeze the
+    # workflow in RUNNING. A genuine bug (any other exception) still fails fast.
+    autoretry_for=(OperationalError, ConcurrencyError),
+)
 def apply_partner_callback(
     self, partner_job_id: str, step_name: str, succeeded: bool, result: Any, error: str | None
 ) -> None:
@@ -65,8 +78,9 @@ def apply_partner_callback(
     gives a fresh UoW per attempt — that reload is what makes concurrent
     deliveries converge (the loser rejoins on fresh state → already terminal →
     no-op). A CallbackPremature (our side not RUNNING yet) becomes a Celery
-    retry with backoff. Finally, any steps unblocked by the callback are
-    dispatched (a no-op while external_call is the terminal node)."""
+    retry with backoff; transient infra errors auto-retry (see the decorator).
+    Finally, any steps unblocked by the callback are dispatched (a no-op while
+    external_call is the terminal node)."""
     command = PartnerCallbackCommand(
         partner_job_id=partner_job_id, step_name=step_name, succeeded=succeeded, result=result, error=error
     )
