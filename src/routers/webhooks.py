@@ -53,7 +53,30 @@ class PartnerWebhookPayload(BaseModel):
     error: str | None = Field(default=None, max_length=2000)
 
 
-@router.post("/partner", status_code=status.HTTP_202_ACCEPTED)
+# Like /dev/sign, the handler reads the RAW body (HMAC is verified over the exact
+# bytes before any parsing), so there is no declared body param and Swagger would
+# render no request-body editor. Declare the body in the OpenAPI schema manually
+# so Swagger shows an editable JSON box; the bytes must be identical to what was
+# signed at /dev/sign for the signature to match.
+@router.post(
+    "/partner",
+    status_code=status.HTTP_202_ACCEPTED,
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"type": "object"},
+                    "example": {
+                        "job_id": "<partner_job_id from GET /documents/{id}>",
+                        "status": "completed",
+                        "result": {"indexed_at": "2026-01-01T00:00:00Z"},
+                    },
+                }
+            },
+        }
+    },
+)
 async def partner_webhook(
     request: Request,
     x_partner_signature: str = Header(default=""),
