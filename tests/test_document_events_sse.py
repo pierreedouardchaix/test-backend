@@ -21,10 +21,11 @@ from src.ports.document_data_source import DocumentDetailRow
 
 
 def _expected_step(event: dict) -> dict:
-    """The client-facing shape of a forwarded step event: workflow_status is
-    mapped to the document-facing `status`; the rest passes through."""
+    """The client-facing shape of a forwarded step event: the internal
+    workflow_status is replaced by its document-facing value (processing/ready/
+    failed) under the same key; the rest passes through."""
     out = {k: v for k, v in event.items() if k != "workflow_status"}
-    out["status"] = {"running": "processing", "succeeded": "ready", "failed": "failed"}[event["workflow_status"]]
+    out["workflow_status"] = {"running": "processing", "succeeded": "ready", "failed": "failed"}[event["workflow_status"]]
     return out
 
 TENANT = uuid.uuid4()
@@ -124,7 +125,7 @@ def test_snapshot_is_the_first_event_then_live_deltas():
     assert r.status_code == 200
     parsed = _sse_events(r.text)
     assert parsed[0] == ("snapshot", {
-        "status": "processing", "version": SNAPSHOT_VERSION, "failed_step": None, "failure_reason": None,
+        "workflow_status": "processing", "version": SNAPSHOT_VERSION, "failed_step": None, "failure_reason": None,
     })
     assert parsed[1:] == [("step", _expected_step(events[0])), ("step", _expected_step(events[1]))]
 
@@ -145,10 +146,10 @@ def test_events_at_or_below_snapshot_version_are_dropped():
     assert step_events == [_expected_step(events[2])]  # only the version-4 event survives the filter
 
 
-def test_already_terminal_workflow_snapshot_is_the_whole_stream():
+def test_already_terminal_workflow_snapshot_then_workflow_event_is_the_whole_stream():
     """A client connecting on an already-finished workflow must not hang: the
-    snapshot carries the terminal status and the stream closes right after
-    (no live events will ever come)."""
+    snapshot carries the terminal status, a distinct terminal `event: workflow`
+    follows, and the stream closes (no live events will ever come)."""
     stream = FakeEventStream([{"step": "late", "workflow_status": "running", "version": 99}])
     try:
         client = _client(reader=lambda doc_id, tenant_id: _detail_row(workflow_status="succeeded"), event_stream=stream)
@@ -158,13 +159,15 @@ def test_already_terminal_workflow_snapshot_is_the_whole_stream():
 
     assert r.status_code == 200
     parsed = _sse_events(r.text)
-    assert len(parsed) == 1
-    kind, data = parsed[0]
-    assert kind == "snapshot"
-    assert data["status"] == "ready"  # succeeded → ready (README vocabulary)
+    assert len(parsed) == 2
+    assert parsed[0][0] == "snapshot"
+    assert parsed[0][1]["workflow_status"] == "ready"  # succeeded → ready (README vocabulary)
+    assert parsed[1] == ("workflow", {
+        "workflow_status": "ready", "version": SNAPSHOT_VERSION, "failed_step": None, "failure_reason": None,
+    })
 
 
-def test_closes_at_terminal_status_ignoring_later_events():
+def test_closes_at_terminal_status_with_a_workflow_event_ignoring_later_events():
     events = [
         {"step": "external_call", "step_status": "running", "workflow_status": "running", "version": 4},
         {"step": "external_call", "step_status": "succeeded", "workflow_status": "succeeded", "version": 5},
@@ -176,6 +179,29 @@ def test_closes_at_terminal_status_ignoring_later_events():
     finally:
         app.dependency_overrides.clear()
 
-    step_events = [data for kind, data in _sse_events(r.text) if kind == "step"]
+    parsed = _sse_events(r.text)
+    step_events = [data for kind, data in parsed if kind == "step"]
     assert step_events == [_expected_step(events[0]), _expected_step(events[1])]  # stopped after terminal (ready)
     assert all(e["step"] != "should_not_appear" for e in step_events)
+    # a distinct terminal workflow event follows the last step and closes the stream
+    workflow_events = [data for kind, data in parsed if kind == "workflow"]
+    assert workflow_events == [
+        {"workflow_status": "ready", "version": 5, "failed_step": None, "failure_reason": None}
+    ]
+
+
+def test_terminal_failure_emits_a_workflow_event_with_the_failed_step_and_reason():
+    events = [
+        {"step": "chunking", "step_status": "failed", "workflow_status": "failed", "version": 6, "error": "boom"},
+    ]
+    try:
+        client = _client(reader=lambda doc_id, tenant_id: _detail_row(), event_stream=FakeEventStream(events))
+        r = client.get(f"/documents/{DOC_ID}/events?token=x")
+    finally:
+        app.dependency_overrides.clear()
+
+    parsed = _sse_events(r.text)
+    workflow_events = [data for kind, data in parsed if kind == "workflow"]
+    assert workflow_events == [
+        {"workflow_status": "failed", "version": 6, "failed_step": "chunking", "failure_reason": "boom"}
+    ]

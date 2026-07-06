@@ -132,6 +132,20 @@ def get_document_results(
     return DocumentResultsResponse(results=results)
 
 
+def _terminal_workflow_event(workflow_status: str, version: int | None, failed_step, failure_reason) -> dict:
+    """A distinct `event: workflow` marking the workflow reaching a terminal
+    state (ready/failed). Emitted right before the stream closes so a client can
+    key its "done" handling off a single event type instead of having to read
+    `workflow_status` on whichever step event happened to trigger the
+    transition. Same payload shape as the snapshot."""
+    return {"event": "workflow", "data": json.dumps({
+        "workflow_status": workflow_status,
+        "version": version,
+        "failed_step": failed_step,
+        "failure_reason": failure_reason,
+    })}
+
+
 @router.get("/{document_id}/events")
 async def stream_document_events(
     document_id: uuid.UUID,
@@ -153,7 +167,11 @@ async def stream_document_events(
     a client is consistent on connect without a separate GET. If already
     terminal, the snapshot is the whole stream — no hang waiting on a silent
     channel. Live `event: step` deltas follow; any event at or below the
-    snapshot version is dropped (already reflected). Close on terminal status.
+    snapshot version is dropped (already reflected). Each forwarded event
+    carries the document-facing `workflow_status` (processing/ready/failed)
+    alongside the task-level `step_status`. When the workflow reaches a terminal
+    state, a distinct `event: workflow` is emitted and the stream closes — so a
+    client has one explicit "done" signal, not a status buried in a step event.
     """
     if read_document(document_id, auth.tenant_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
@@ -166,25 +184,40 @@ async def stream_document_events(
             snapshot_version = snapshot.workflow_version
             snapshot_status = document_status(snapshot.workflow_status)  # document-facing: processing/ready/failed
             yield {"event": "snapshot", "data": json.dumps({
-                "status": snapshot_status,
+                "workflow_status": snapshot_status,
                 "version": snapshot_version,
                 "failed_step": snapshot.failed_step,
                 "failure_reason": snapshot.failure_reason,
             })}
             if snapshot_status in DOCUMENT_TERMINAL_STATUSES:
+                # Already terminal on connect: emit the explicit workflow event too
+                # (same signal whether discovered via snapshot or a live delta).
+                yield _terminal_workflow_event(
+                    snapshot_status, snapshot_version, snapshot.failed_step, snapshot.failure_reason
+                )
                 return
 
             async for event in events:
                 if event.get("version", 0) <= snapshot_version:
                     continue  # already reflected in the snapshot (older or duplicate)
-                # Map the internal workflow status to the document-facing one; the
-                # per-step `step_status` is task-level and stays as is. Build a new
-                # dict (don't mutate the incoming event).
+                # Map the internal workflow status to the document-facing one under
+                # `workflow_status`; the per-step `step_status` is task-level and
+                # stays as is. Build a new dict (don't mutate the incoming event).
                 doc_status = document_status(event.get("workflow_status", ""))
                 out = {k: v for k, v in event.items() if k != "workflow_status"}
-                out["status"] = doc_status
+                out["workflow_status"] = doc_status
                 yield {"event": "step", "data": json.dumps(out)}
                 if doc_status in DOCUMENT_TERMINAL_STATUSES:
+                    # The transition to terminal rode in on this step event; surface
+                    # it as a first-class workflow event, then close. On failure the
+                    # failing step and its error are this event's step/error.
+                    failed = doc_status == "failed"
+                    yield _terminal_workflow_event(
+                        doc_status,
+                        event.get("version"),
+                        event.get("step") if failed else None,
+                        event.get("error") if failed else None,
+                    )
                     return
 
     return EventSourceResponse(event_generator())
