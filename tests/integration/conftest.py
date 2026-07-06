@@ -19,6 +19,50 @@ from sqlalchemy import create_engine, text
 import src.adapters.sql.rls  # noqa: F401 — registers the RLS after_begin listener on Session
 from src.adapters.sql.engine import create_session_factory
 
+
+def _autoconfigure_docker_env() -> None:
+    """Make `pytest -m integration` run with zero manual setup.
+
+    testcontainers talks to Docker via the docker-py SDK, which — unlike the
+    docker CLI — ignores the CLI's active *context* and only reads DOCKER_HOST
+    (falling back to /var/run/docker.sock). Docker Desktop / colima / Rancher put
+    the socket in a per-user path, so a reviewer with a working `docker` CLI
+    still gets "Error while fetching server API version". Resolve it here: honour
+    an explicit DOCKER_HOST, else the default socket if present, else ask the
+    docker CLI for its context endpoint, else probe the usual per-user sockets.
+    """
+    import shutil
+    import subprocess
+
+    if not os.environ.get("DOCKER_HOST") and not os.path.exists("/var/run/docker.sock"):
+        host = None
+        docker = shutil.which("docker")
+        if docker:
+            try:
+                host = subprocess.run(
+                    [docker, "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"],
+                    capture_output=True, text=True, timeout=5,
+                ).stdout.strip() or None
+            except Exception:
+                host = None
+        if not host:
+            for candidate in ("~/.docker/run/docker.sock", "~/.colima/default/docker.sock", "~/.rd/docker.sock"):
+                path = os.path.expanduser(candidate)
+                if os.path.exists(path):
+                    host = f"unix://{path}"
+                    break
+        if host:
+            os.environ["DOCKER_HOST"] = host
+
+    # Ryuk (the testcontainers reaper) spawns a side container that must dial back
+    # in — a handshake that's flaky on some local Docker setups. The fixtures here
+    # tear their own containers down, so disable it by default; override with
+    # TESTCONTAINERS_RYUK_DISABLED=false (e.g. in CI) if you want the reaper.
+    os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
+
+
+_autoconfigure_docker_env()
+
 TENANT_A = uuid.UUID("aaaaaaaa-0000-0000-0000-000000000001")
 USER_A = uuid.UUID("aaaaaaaa-0000-0000-0000-0000000000a1")
 TENANT_B = uuid.UUID("bbbbbbbb-0000-0000-0000-000000000002")
