@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 from src.application.apply_partner_callback import WorkflowNotFound
 from src.application.get_document import DocumentNotFound
-from src.domain.errors import TaskNotFound
+from src.domain.errors import DomainValidationError, InvalidStateTransition, TaskNotFound
 from src.logging_config import configure_logging
 from src.routers import auth, dev, documents, webhooks
 
@@ -30,14 +30,27 @@ app.include_router(dev.router)
 app.include_router(webhooks.router)
 
 
-# Not-found domain errors → 404, in one place, so routers just let them
-# propagate instead of each wrapping the same try/except. Other DomainErrors are
-# unexpected and keep surfacing as 500 (no handler registered for the base).
+# Typed domain errors → the right status, in one place, so routers just let them
+# propagate instead of each wrapping the same try/except. An *un*typed
+# DomainError stays a 500 (no handler registered for the base) — that's the
+# "this is a bug" signal, kept distinct from these expected conditions.
 @app.exception_handler(DocumentNotFound)
 @app.exception_handler(WorkflowNotFound)
 @app.exception_handler(TaskNotFound)
 async def _not_found_handler(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": str(exc) or "Not found"})
+
+
+# Invariant/input violation (empty upload, bad definition, unknown step) → 422.
+@app.exception_handler(DomainValidationError)
+async def _validation_handler(request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"detail": str(exc) or "Invalid request"})
+
+
+# Illegal state transition (e.g. an outcome applied to a terminal workflow) → 409.
+@app.exception_handler(InvalidStateTransition)
+async def _conflict_handler(request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={"detail": str(exc) or "Conflict"})
 
 
 @app.get("/healthcheck")

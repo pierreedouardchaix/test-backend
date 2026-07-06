@@ -77,6 +77,11 @@ async def upload_document(
             raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Uploaded file too large")
 
     content = await _read_capped(file)
+    if not content:
+        # A 0-byte upload can't be processed. Reject it here as unprocessable
+        # input — 422, not 204: the request failed, it didn't succeed with no
+        # content. (The domain's size guard is the same 422 as a safety net.)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Uploaded file is empty")
     result = IngestDocumentUseCase(uow, blob_store, dispatcher).execute(
         IngestDocumentCommand(
             tenant_id=auth.tenant_id,

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Self
 
-from src.domain.errors import TaskNotFound
+from src.domain.errors import DomainValidationError, InvalidStateTransition, TaskNotFound
 from src.domain.models.task import Task
 from src.domain.models.workflow_definition import StepDefinition, WorkflowDefinition
 
@@ -58,9 +58,9 @@ class Workflow:
 
     def record_step_result(self, step_name: str, result: Any) -> None:
         if self.status != WorkflowStatus.RUNNING:
-            raise ValueError(f"Cannot record a step result on a workflow that is {self.status}")
+            raise InvalidStateTransition(f"Cannot record a step result on a workflow that is {self.status}")
         if step_name not in self.definition.step_names():
-            raise ValueError(
+            raise DomainValidationError(
                 f"Unknown step {step_name!r} for workflow definition {self.definition.name!r}"
             )
 
@@ -71,7 +71,7 @@ class Workflow:
     def mark_failed(self, *, caused_by_step: str, reason: str) -> None:
         """Mark the whole workflow failed, attributing it to a step."""
         if self.status != WorkflowStatus.RUNNING:
-            raise ValueError(f"Cannot fail a workflow that is already {self.status}")
+            raise InvalidStateTransition(f"Cannot fail a workflow that is already {self.status}")
         self.status = WorkflowStatus.FAILED
         self.failed_step = caused_by_step
         self.failure_reason = reason
@@ -94,9 +94,9 @@ class Workflow:
         reuse it across retries — and mark it started. Call right before
         actually running the step's function."""
         if self.status != WorkflowStatus.RUNNING:
-            raise ValueError(f"Cannot dispatch a task on a workflow that is {self.status}")
+            raise InvalidStateTransition(f"Cannot dispatch a task on a workflow that is {self.status}")
         if step_name not in self.definition.step_names():
-            raise ValueError(
+            raise DomainValidationError(
                 f"Unknown step {step_name!r} for workflow definition {self.definition.name!r}"
             )
 
@@ -113,7 +113,7 @@ class Workflow:
         """Apply a task's successful outcome. Returns the step names newly
         unblocked (fan-out/fan-in resolved here)."""
         if self.status != WorkflowStatus.RUNNING:
-            raise ValueError(f"Cannot apply a task outcome on a workflow that is {self.status}")
+            raise InvalidStateTransition(f"Cannot apply a task outcome on a workflow that is {self.status}")
         self.get_task(step_name).succeed()
         self.record_step_result(step_name, result)
         return self.ready_steps()
@@ -124,7 +124,7 @@ class Workflow:
         reschedules the same task. Only a terminal failure (attempts
         exhausted) reaches the workflow."""
         if self.status != WorkflowStatus.RUNNING:
-            raise ValueError(f"Cannot apply a task outcome on a workflow that is {self.status}")
+            raise InvalidStateTransition(f"Cannot apply a task outcome on a workflow that is {self.status}")
         can_retry = self.get_task(step_name).fail(error)
         if not can_retry:
             self.mark_failed(caused_by_step=step_name, reason=error)
@@ -134,7 +134,7 @@ class Workflow:
         and is awaiting its callback. The task stays RUNNING; the workflow is
         unchanged — this only records how to correlate the incoming webhook."""
         if self.status != WorkflowStatus.RUNNING:
-            raise ValueError(f"Cannot defer a task on a workflow that is {self.status}")
+            raise InvalidStateTransition(f"Cannot defer a task on a workflow that is {self.status}")
         self.get_task(step_name).mark_deferred(partner_job_id)
 
     def on_task_failed_terminally(self, step_name: str, error: str) -> None:
@@ -142,6 +142,6 @@ class Workflow:
         partner webhook). Unlike on_task_failed this never retries — the outcome
         is already final."""
         if self.status != WorkflowStatus.RUNNING:
-            raise ValueError(f"Cannot apply a task outcome on a workflow that is {self.status}")
+            raise InvalidStateTransition(f"Cannot apply a task outcome on a workflow that is {self.status}")
         self.get_task(step_name).fail_terminally(error)
         self.mark_failed(caused_by_step=step_name, reason=error)

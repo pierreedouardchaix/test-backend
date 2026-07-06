@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Self
 
+from src.domain.errors import DomainValidationError
+
 
 @dataclass
 class User:
@@ -13,7 +15,7 @@ class User:
 
     def __post_init__(self) -> None:
         if not all([self.first_name.strip(), self.last_name.strip()]):
-            raise ValueError("User name must not be empty")
+            raise DomainValidationError("User name must not be empty")
 
     @classmethod
     def create(cls, first_name: str, last_name: str) -> Self:

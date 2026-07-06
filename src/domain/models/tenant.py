@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Self
 
+from src.domain.errors import DomainValidationError
 from src.domain.models.user import User
 
 
@@ -17,7 +18,7 @@ class Tenant:
 
     def __post_init__(self) -> None:
         if not self.name.strip():
-            raise ValueError("Tenant name must not be empty")
+            raise DomainValidationError("Tenant name must not be empty")
 
     @classmethod
     def create(cls, name: str) -> Self:

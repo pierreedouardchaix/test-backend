@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Self
 
+from src.domain.errors import DomainValidationError
+
 
 @dataclass
 class Document:
@@ -21,9 +23,9 @@ class Document:
 
     def __post_init__(self) -> None:
         if not self.filename.strip():
-            raise ValueError("Document filename must not be empty")
+            raise DomainValidationError("Document filename must not be empty")
         if self.size_bytes <= 0:
-            raise ValueError("Document size_bytes must be positive")
+            raise DomainValidationError("Document size_bytes must be positive")
 
     @classmethod
     def create(

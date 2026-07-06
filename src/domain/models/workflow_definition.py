@@ -1,6 +1,8 @@
 from collections import deque
 from dataclasses import dataclass
 
+from src.domain.errors import DomainValidationError
+
 
 @dataclass(frozen=True)
 class StepDefinition:
@@ -12,7 +14,7 @@ class StepDefinition:
 
     def __post_init__(self) -> None:
         if self.max_attempts < 1:
-            raise ValueError(f"Step {self.name!r} must allow at least 1 attempt")
+            raise DomainValidationError(f"Step {self.name!r} must allow at least 1 attempt")
 
 
 @dataclass(frozen=True)
@@ -30,13 +32,13 @@ class WorkflowDefinition:
     def __post_init__(self) -> None:
         names = [step.name for step in self.steps]
         if len(names) != len(set(names)):
-            raise ValueError(f"Workflow definition {self.name!r} has duplicate step names")
+            raise DomainValidationError(f"Workflow definition {self.name!r} has duplicate step names")
 
         known = set(names)
         for step in self.steps:
             unknown = step.depends_on - known
             if unknown:
-                raise ValueError(
+                raise DomainValidationError(
                     f"Step {step.name!r} depends on unknown step(s): {sorted(unknown)}"
                 )
 
@@ -60,7 +62,7 @@ class WorkflowDefinition:
                     queue.append(dependent)
 
         if visited != len(self.steps):
-            raise ValueError(f"Workflow definition {self.name!r} contains a cycle")
+            raise DomainValidationError(f"Workflow definition {self.name!r} contains a cycle")
 
     def step_names(self) -> frozenset[str]:
         return frozenset(step.name for step in self.steps)
@@ -69,7 +71,7 @@ class WorkflowDefinition:
         for step in self.steps:
             if step.name == name:
                 return step
-        raise ValueError(f"Unknown step {name!r} for workflow definition {self.name!r}")
+        raise DomainValidationError(f"Unknown step {name!r} for workflow definition {self.name!r}")
 
     def roots(self) -> frozenset[str]:
         return frozenset(step.name for step in self.steps if not step.depends_on)

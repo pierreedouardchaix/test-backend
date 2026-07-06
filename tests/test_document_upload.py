@@ -41,6 +41,16 @@ def test_upload_small_file_succeeds():
     uuid.UUID(body["document_id"])  # a real id was returned
 
 
+def test_upload_empty_file_returns_422_not_500():
+    try:
+        r = _client().post("/documents", files={"file": ("empty.pdf", b"", "application/pdf")})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert r.status_code == 422
+    assert "empty" in r.json()["detail"].lower()
+
+
 def test_upload_exceeding_the_size_cap_returns_413(monkeypatch):
     monkeypatch.setattr(documents_router, "_MAX_UPLOAD_BYTES", 8)  # tiny cap for the test
     try:

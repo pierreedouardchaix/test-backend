@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Self
 
+from src.domain.errors import InvalidStateTransition
+
 
 class TaskStatus(StrEnum):
     PENDING = "pending"
@@ -59,7 +61,7 @@ class Task:
     def start(self) -> None:
         """Call right before executing the step's function — once per attempt."""
         if self.status not in (TaskStatus.PENDING, TaskStatus.RETRYING):
-            raise ValueError(f"Cannot start a task that is {self.status}")
+            raise InvalidStateTransition(f"Cannot start a task that is {self.status}")
         self.status = TaskStatus.RUNNING
         self.attempts += 1
         if self.started_at is None:
@@ -67,7 +69,7 @@ class Task:
 
     def succeed(self) -> None:
         if self.status != TaskStatus.RUNNING:
-            raise ValueError(f"Cannot succeed a task that is {self.status}")
+            raise InvalidStateTransition(f"Cannot succeed a task that is {self.status}")
         self.status = TaskStatus.SUCCEEDED
         self.finished_at = datetime.now(timezone.utc)
 
@@ -78,7 +80,7 @@ class Task:
         False if attempts are exhausted and the failure is now terminal.
         """
         if self.status != TaskStatus.RUNNING:
-            raise ValueError(f"Cannot fail a task that is {self.status}")
+            raise InvalidStateTransition(f"Cannot fail a task that is {self.status}")
         self.errors.append(
             TaskAttemptError(attempt=self.attempts, error=error, occurred_at=datetime.now(timezone.utc))
         )
@@ -94,7 +96,7 @@ class Task:
         and is awaiting its callback. The task stays RUNNING — only the
         correlation id is attached; nothing else changes."""
         if self.status != TaskStatus.RUNNING:
-            raise ValueError(f"Cannot defer a task that is {self.status}")
+            raise InvalidStateTransition(f"Cannot defer a task that is {self.status}")
         self.partner_job_id = partner_job_id
 
     def fail_terminally(self, error: str) -> None:
@@ -102,7 +104,7 @@ class Task:
         outcome declared final by an external authority (e.g. the partner
         webhook reports the job failed; the partner does its own retrying)."""
         if self.status != TaskStatus.RUNNING:
-            raise ValueError(f"Cannot fail a task that is {self.status}")
+            raise InvalidStateTransition(f"Cannot fail a task that is {self.status}")
         self.errors.append(
             TaskAttemptError(attempt=self.attempts, error=error, occurred_at=datetime.now(timezone.utc))
         )
