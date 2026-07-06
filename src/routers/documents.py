@@ -1,7 +1,7 @@
 import json
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
 from sse_starlette.sse import EventSourceResponse
 
 from src.application.get_document import GetDocumentQuery, GetDocumentUseCase
@@ -32,16 +32,51 @@ from src.routers.schemas import (
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
+# Bound the in-memory upload. A pipeline legitimately handles large scans, but
+# an unbounded `await file.read()` lets a single request pin arbitrary RAM in
+# the API process — the same DoS posture the webhook guards against. Mirror it
+# here: cap the body as a second line of defence, and enforce the real limit at
+# the reverse proxy (e.g. nginx `client_max_body_size`) — the app check is the
+# backstop, not the gate.
+_MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
+_UPLOAD_CHUNK_BYTES = 1024 * 1024  # read in 1 MB chunks so we never buffer past the cap
+
+
+async def _read_capped(file: UploadFile) -> bytes:
+    """Read the upload in chunks, aborting with 413 as soon as it exceeds the
+    cap — so an over-large (or Content-Length-lying) body never accumulates
+    more than `_MAX_UPLOAD_BYTES` in memory."""
+    chunks: list[bytes] = []
+    size = 0
+    while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
+        size += len(chunk)
+        if size > _MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Uploaded file too large")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 
 @router.post("", status_code=201)
 async def upload_document(
     file: UploadFile,
+    request: Request,
     auth: AuthContext = Depends(get_current_user),
     uow: UnitOfWork = Depends(get_uow),
     blob_store: BlobStore = Depends(get_blob_store),
     dispatcher: WorkflowDispatcher = Depends(get_workflow_dispatcher),
 ):
-    content = await file.read()
+    # Fast-fail on an honest Content-Length before reading a byte; the capped
+    # read below is the real guard (a client can under-declare or omit it).
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            declared_length = int(declared)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length header")
+        if declared_length > _MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Uploaded file too large")
+
+    content = await _read_capped(file)
     result = IngestDocumentUseCase(uow, blob_store, dispatcher).execute(
         IngestDocumentCommand(
             tenant_id=auth.tenant_id,
