@@ -6,12 +6,10 @@ from src.application.unit_of_work import UnitOfWork
 from src.application.workflow_orchestrator import WorkflowOrchestrator
 from src.application.write_use_case import CrossTenantWriteUseCase
 from src.domain.errors import DomainError
-from src.domain.models.task import TaskStatus
+from src.domain.models.task import TERMINAL_TASK_STATUSES, TaskStatus
 from src.domain.models.workflow import WorkflowStatus
 from src.ports.blob_store import BlobStore
 from src.ports.event_publisher import EventPublisher
-
-_TERMINAL_TASK_STATUSES = (TaskStatus.SUCCEEDED, TaskStatus.FAILED)
 
 
 class WorkflowNotFound(DomainError):
@@ -73,7 +71,7 @@ class ApplyPartnerCallbackUseCase(CrossTenantWriteUseCase[PartnerCallbackCommand
         task = workflow.tasks.get(command.step_name)
         # Task-level idempotence: the step already reached a terminal outcome →
         # this callback (a partner retry, or a duplicate delivery) is a no-op.
-        if task is not None and task.status in _TERMINAL_TASK_STATUSES:
+        if task is not None and task.status in TERMINAL_TASK_STATUSES:
             return PartnerCallbackResult(**ids, workflow_status=workflow.status.value, already_processed=True)
         # Workflow already terminal for another reason (e.g. a sibling step failed)
         # → nothing to apply. Belt-and-suspenders alongside the task check above.

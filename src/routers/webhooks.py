@@ -21,6 +21,7 @@ from src.dependencies import (
     get_partner_job_resolver,
     get_settings,
 )
+from src.domain.models.task import TERMINAL_TASK_STATUSES
 from src.partner_hmac import verify
 from src.ports.partner_callback_dispatcher import PartnerCallbackDispatcher
 from src.settings import Settings
@@ -50,9 +51,6 @@ class PartnerWebhookPayload(BaseModel):
     status: str  # "completed" | "failed"
     result: Any | None = None
     error: str | None = Field(default=None, max_length=2000)
-
-
-_TERMINAL_TASK_STATUSES = ("succeeded", "failed")
 
 
 @router.post("/partner", status_code=status.HTTP_202_ACCEPTED)
@@ -95,7 +93,7 @@ async def partner_webhook(
     # synchronously (200) without enqueuing — the task-level idempotence in the
     # use case is still the real guarantee against a concurrent duplicate that
     # slips past this best-effort check.
-    if task_status in _TERMINAL_TASK_STATUSES:
+    if task_status in TERMINAL_TASK_STATUSES:
         return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "already_processed"})
 
     dispatcher.dispatch(

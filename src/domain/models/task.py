@@ -15,6 +15,13 @@ class TaskStatus(StrEnum):
     FAILED = "failed"
 
 
+# The outcomes past which a task no longer changes — a callback landing on one
+# is an idempotent no-op. Single source of truth shared by the webhook gate and
+# the apply-callback use case (StrEnum members compare equal to their string
+# values, so a membership test works for both enum and raw-string inputs).
+TERMINAL_TASK_STATUSES = frozenset({TaskStatus.SUCCEEDED, TaskStatus.FAILED})
+
+
 @dataclass(frozen=True)
 class TaskAttemptError:
     attempt: int
